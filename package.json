@@ -1,0 +1,27 @@
+{
+  "name": "my-sync-extension",
+  "displayName": "My Sync Extension",
+  "description": "Sync files between Mac (VSCode client) and Windows server over LAN using WebSocket",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "main": "extension.js",
+  "activationEvents": [
+    "onCommand:mySyncExtension.startSync"
+  ],
+  "scripts": {
+    "start-server": "node server.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "mySyncExtension.startSync",
+        "title": "Start Sync"
+      }
+    ]
+  },
+  "dependencies": {
+    "ws": "^8.13.0"
+  }
+}
