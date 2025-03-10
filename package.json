@@ -1,14 +1,15 @@
 {
   "name": "my-sync-extension",
   "displayName": "My Sync Extension",
-  "description": "Sync files between Mac (VSCode client) and Windows server over LAN using WebSocket",
-  "version": "0.0.1",
+  "description": "Sync files between macOS (VSCode client) and Windows (server) over LAN, supporting subfolders and ignoring node_modules, .png, .git. Includes a 'Stop Sync' command to clear server data. Normalizes paths to avoid unwanted concatenation.",
+  "version": "0.0.6",
   "engines": {
     "vscode": "^1.70.0"
   },
   "main": "extension.js",
   "activationEvents": [
-    "onCommand:mySyncExtension.startSync"
+    "onCommand:mySyncExtension.startSync",
+    "onCommand:mySyncExtension.stopSync"
   ],
   "scripts": {
     "start-server": "node server.js"
@@ -18,10 +19,15 @@
       {
         "command": "mySyncExtension.startSync",
         "title": "Start Sync"
+      },
+      {
+        "command": "mySyncExtension.stopSync",
+        "title": "Stop Sync"
       }
     ]
   },
   "dependencies": {
-    "ws": "^8.13.0"
+    "ws": "^8.13.0",
+    "chokidar": "^3.5.3"
   }
 }
