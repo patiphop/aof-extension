@@ -1,33 +1,84 @@
 {
-  "name": "my-sync-extension",
-  "displayName": "My Sync Extension",
-  "description": "Sync files between macOS (VSCode client) and Windows (server) over LAN, supporting subfolders and ignoring node_modules, .png, .git. Includes a 'Stop Sync' command to clear server data. Normalizes paths to avoid unwanted concatenation.",
-  "version": "0.0.6",
+  "name": "faizsync-extension",
+  "displayName": "faizSync Extension",
+  "description": "A VSCode extension for real-time file synchronization with WebSocket support",
+  "version": "1.0.0",
+  "publisher": "faizsync",
   "engines": {
-    "vscode": "^1.70.0"
+    "vscode": "^1.74.0"
   },
-  "main": "extension.js",
-  "activationEvents": [
-    "onCommand:mySyncExtension.startSync",
-    "onCommand:mySyncExtension.stopSync"
+  "categories": [
+    "Other"
   ],
-  "scripts": {
-    "start-server": "node server.js"
-  },
+  "activationEvents": [
+    "onCommand:faizsync.startSync",
+    "onCommand:faizsync.stopSync",
+    "onCommand:faizsync.openWebView"
+  ],
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "mySyncExtension.startSync",
-        "title": "Start Sync"
+        "command": "faizsync.startSync",
+        "title": "Start faizSync",
+        "category": "faizSync"
       },
       {
-        "command": "mySyncExtension.stopSync",
-        "title": "Stop Sync"
+        "command": "faizsync.stopSync",
+        "title": "Stop faizSync",
+        "category": "faizSync"
+      },
+      {
+        "command": "faizsync.openWebView",
+        "title": "Open faizSync WebView",
+        "category": "faizSync"
       }
     ]
   },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build": "npm run compile && vsce package"
+  },
+  "devDependencies": {
+    "@types/minimatch": "^5.1.2",
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "@types/ws": "^8.5.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "@vitest/coverage-v8": "^0.34.0",
+    "eslint": "^8.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^4.9.0",
+    "vitest": "^0.34.0",
+    "vsce": "^2.0.0"
+  },
   "dependencies": {
-    "ws": "^8.13.0",
-    "chokidar": "^3.5.3"
-  }
+    "minimatch": "^10.0.3",
+    "ws": "^8.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/patiphop/aof-extension.git"
+  },
+  "keywords": [
+    "vscode",
+    "extension",
+    "sync",
+    "websocket",
+    "git"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/patiphop/aof-extension/issues"
+  },
+  "homepage": "https://github.com/patiphop/aof-extension#readme"
 }

@@ -1,4 +1,11 @@
-node_modules
-synced-folder
-preview-test
-all-files
+coverage/
+dist/
+node_modules/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+.DS_Store
+
