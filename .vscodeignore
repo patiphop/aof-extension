@@ -1,0 +1,46 @@
+# Source code (ไม่ต้องการใน production)
+# src/  # Comment out for development
+# tests/  # Comment out for development
+# extension/  # Comment out for development
+
+# Development files (comment out for development)
+# .eslintrc.js  # Comment out for development
+# tsconfig.json  # Comment out for development
+# vitest.config.ts  # Comment out for development
+# .gitignore  # Comment out for development
+
+# Documentation (comment out for development)
+# README.md  # Comment out for development
+# LOGGING.md  # Comment out for development
+# DEPLOYMENT.md  # Comment out for development
+
+# Build artifacts (comment out for development)
+# coverage/  # Comment out for development
+# *.tsbuildinfo  # Comment out for development
+
+# Development dependencies (comment out for development)
+# node_modules/  # Comment out for development
+
+# Git
+.git/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Server code (ไม่ต้องการใน extension)
+server/
+
+# Synced files (ไม่ต้องการใน extension)
+synced-files/
+
+# Package lock (ไม่ต้องการใน extension)
+package-lock.json
+
+# TypeScript source maps (comment out for development)
+# *.d.ts.map  # Comment out for development
+# *.js.map  # Comment out for development
