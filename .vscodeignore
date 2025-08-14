@@ -1,46 +1,34 @@
-# Source code (ไม่ต้องการใน production)
-# src/  # Comment out for development
-# tests/  # Comment out for development
-# extension/  # Comment out for development
+# Exclude everything by default
+*
 
-# Development files (comment out for development)
-# .eslintrc.js  # Comment out for development
-# tsconfig.json  # Comment out for development
-# vitest.config.ts  # Comment out for development
-# .gitignore  # Comment out for development
+# Include only necessary files
+!package.json
+!LICENSE
+!dist/extension.js
+!dist/extension.js.map
 
-# Documentation (comment out for development)
-# README.md  # Comment out for development
-# LOGGING.md  # Comment out for development
-# DEPLOYMENT.md  # Comment out for development
-
-# Build artifacts (comment out for development)
-# coverage/  # Comment out for development
-# *.tsbuildinfo  # Comment out for development
-
-# Development dependencies (comment out for development)
-# node_modules/  # Comment out for development
-
-# Git
-.git/
-
-# IDE files
+# Explicitly exclude everything else
+node_modules/
+src/
+tests/
+server/
+*.md
+*.ts
+*.d.ts
+*.d.ts.map
+dist/config/
+dist/services/
+dist/utils/
+dist/webview/
+.eslintrc.js
+tsconfig.json
+vitest.config.ts
+webpack.config.js
+.gitignore
+package-lock.json
 .vscode/
 .idea/
-
-# OS files
 .DS_Store
 Thumbs.db
-
-# Server code (ไม่ต้องการใน extension)
-server/
-
-# Synced files (ไม่ต้องการใน extension)
-synced-files/
-
-# Package lock (ไม่ต้องการใน extension)
-package-lock.json
-
-# TypeScript source maps (comment out for development)
-# *.d.ts.map  # Comment out for development
-# *.js.map  # Comment out for development
+coverage/
+*.tsbuildinfo
