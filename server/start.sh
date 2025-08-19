@@ -19,10 +19,20 @@ echo "🔨 Building server..."
 npm run build
 
 # Start the server
-echo "🔄 Starting server on port 1420..."
-echo "📡 WebSocket URL: ws://localhost:1420"
-echo "📁 Files will be stored in: ./synced-files/"
+PORT=${PORT:-1420}
+BASE_DIR_ARG="$1"
+if [ -n "$BASE_DIR_ARG" ]; then
+  export BASE_DIR="$BASE_DIR_ARG"
+fi
+
+echo "🔄 Starting server on port $PORT..."
+echo "📡 WebSocket URL: ws://0.0.0.0:$PORT"
+if [ -n "$BASE_DIR" ]; then
+  echo "📁 Watching folder: $BASE_DIR"
+else
+  echo "📁 Files will be stored in: ./synced-files/"
+fi
 echo "⏹️  Press Ctrl+C to stop the server"
 echo ""
 
-npm start
+PORT=$PORT npm start

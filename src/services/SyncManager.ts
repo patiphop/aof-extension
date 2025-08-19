@@ -8,7 +8,11 @@ import { logger } from '../utils/Logger';
 
 export interface ServerMessage {
   type: string;
-  payload?: any;
+  payload?: {
+    relativePath?: string;
+    fileContent?: string;
+    version?: number;
+  };
 }
 
 export class SyncManager extends EventEmitter {
@@ -124,10 +128,37 @@ export class SyncManager extends EventEmitter {
   handleServerMessage(message: ServerMessage): void {
     switch (message.type) {
       case 'FILE_UPDATED':
-        this.handleFileUpdate(message.payload);
+        if (message.payload?.relativePath && message.payload?.fileContent) {
+          this.handleFileUpdate({
+            relativePath: message.payload.relativePath,
+            fileContent: message.payload.fileContent
+          });
+        }
         break;
-      case 'DELETE_FILE':
-        this.handleFileDelete(message.payload);
+      case 'FILE_CREATED':
+        if (message.payload?.relativePath && message.payload?.fileContent) {
+          this.handleFileCreated({
+            relativePath: message.payload.relativePath,
+            fileContent: message.payload.fileContent,
+            version: message.payload.version
+          });
+        }
+        break;
+      case 'FILE_CHANGED':
+        if (message.payload?.relativePath && message.payload?.fileContent) {
+          this.handleFileChanged({
+            relativePath: message.payload.relativePath,
+            fileContent: message.payload.fileContent,
+            version: message.payload.version
+          });
+        }
+        break;
+      case 'FILE_DELETED':
+        if (message.payload?.relativePath) {
+          this.handleFileDelete({
+            relativePath: message.payload.relativePath
+          });
+        }
         break;
       case 'FOLDER_CLEARED':
         this.handleFolderCleared();
@@ -182,9 +213,16 @@ export class SyncManager extends EventEmitter {
   }
 
   /**
-   * Handle file update from server
+   * Handle file update from server (legacy)
    */
   private handleFileUpdate(payload: { relativePath: string; fileContent: string }): void {
+    this.handleFileChanged(payload);
+  }
+
+  /**
+   * Handle file creation from server
+   */
+  private handleFileCreated(payload: { relativePath: string; fileContent: string; version?: number }): void {
     const { relativePath, fileContent } = payload;
     const localFilePath = path.join(this.localFolderPath, ...relativePath.split('/'));
 
@@ -195,12 +233,53 @@ export class SyncManager extends EventEmitter {
         fs.mkdirSync(dir, { recursive: true });
       }
 
+      // Check if file already exists locally
+      if (fs.existsSync(localFilePath)) {
+        logger.warn(`File already exists locally: ${relativePath}`);
+        return;
+      }
+
       // Write file content
       fs.writeFileSync(localFilePath, fileContent, 'utf8');
-      logger.sync(`File updated from server: ${relativePath}`);
-      this.emit('fileUpdated', relativePath);
+      logger.sync(`File created from server: ${relativePath}`);
+      this.emit('fileCreated', relativePath);
     } catch (error) {
-      logger.error(`Error updating file ${relativePath}:`, error);
+      logger.error(`Error creating file ${relativePath}:`, error);
+    }
+  }
+
+  /**
+   * Handle file change from server
+   */
+  private handleFileChanged(payload: { relativePath: string; fileContent: string; version?: number }): void {
+    const { relativePath, fileContent } = payload;
+    const localFilePath = path.join(this.localFolderPath, ...relativePath.split('/'));
+
+    try {
+      // Create directory if it doesn't exist
+      const dir = path.dirname(localFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      // Check if local file has been modified recently
+      if (fs.existsSync(localFilePath)) {
+        const localContent = fs.readFileSync(localFilePath, 'utf8');
+        
+        // If local content is different, there might be a conflict
+        if (localContent !== fileContent) {
+          logger.warn(`Potential conflict detected for ${relativePath}. Local and server versions differ.`);
+          // For now, we'll let the server version win
+          // In a more sophisticated system, we'd implement conflict resolution
+        }
+      }
+
+      // Write file content
+      fs.writeFileSync(localFilePath, fileContent, 'utf8');
+      logger.sync(`File changed from server: ${relativePath}`);
+      this.emit('fileChanged', relativePath);
+    } catch (error) {
+      logger.error(`Error changing file ${relativePath}:`, error);
     }
   }
 

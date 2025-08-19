@@ -1,21 +1,23 @@
-const path = require('path');
+const path = require("path");
 
 module.exports = {
-  target: 'node',
-  mode: 'production',
-  entry: './src/extension.ts',
+  target: "node",
+  mode: "production",
+  entry: "./src/extension.ts",
   output: {
-    path: path.resolve(__dirname, 'dist'),
-    filename: 'extension.js',
-    libraryTarget: 'commonjs2',
-    devtoolModuleFilenameTemplate: '../[resource-path]'
+    path: path.resolve(__dirname, "dist"),
+    filename: "extension.js",
+    libraryTarget: "commonjs2",
+    devtoolModuleFilenameTemplate: "../[resource-path]",
   },
-  devtool: 'source-map',
+  devtool: "source-map",
   externals: {
-    vscode: 'commonjs vscode'
+    vscode: "commonjs vscode",
+    bufferutil: "commonjs bufferutil",
+    "utf-8-validate": "commonjs utf-8-validate",
   },
   resolve: {
-    extensions: ['.ts', '.js']
+    extensions: [".ts", ".js"],
   },
   module: {
     rules: [
@@ -24,10 +26,10 @@ module.exports = {
         exclude: /node_modules/,
         use: [
           {
-            loader: 'ts-loader'
-          }
-        ]
-      }
-    ]
-  }
+            loader: "ts-loader",
+          },
+        ],
+      },
+    ],
+  },
 };

@@ -7,6 +7,7 @@ logger.setLogLevel(LogLevel.INFO); // Can be changed to WARN to reduce logs
 
 // Get port from environment or use default
 const port = parseInt(process.env.PORT || '1420', 10);
+const baseDir = process.env.BASE_DIR;
 
 // Create and start the sync server
 const server = new SyncServer(port);
@@ -40,4 +41,7 @@ process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
 logger.server('faizSync Server is running...');
 logger.server(`- Port: ${port}`);
 logger.server(`- WebSocket URL: ws://localhost:${port}`);
+if (baseDir) {
+  logger.server(`- BaseDir: ${baseDir}`);
+}
 logger.server(`- Press Ctrl+C to stop the server`);

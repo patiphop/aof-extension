@@ -7,6 +7,9 @@ import {
   FileSyncMessage, 
   DeleteFileMessage, 
   ClearFolderMessage,
+  FileUpdateMessage,
+  FileCreatedMessage,
+  FileChangedMessage,
   ClientInfo 
 } from './types';
 
@@ -19,13 +22,16 @@ export class SyncServer {
 
   constructor(port: number = 1420) {
     this.port = port;
-    this.fileManager = new FileManager();
+    const baseDir = process.env.BASE_DIR || './synced-files';
+    this.fileManager = new FileManager(baseDir);
     this.wss = new WebSocketServer({ port });
     
     this.setupWebSocketServer();
+    this.setupFileWatcher();
     this.startPingInterval();
     
     logger.server(`faizSync Server started on port ${port}`);
+    logger.server(`Base directory: ${this.fileManager.getBaseDir()}`);
   }
 
   /**
@@ -39,6 +45,45 @@ export class SyncServer {
     this.wss.on('error', (error: Error) => {
       logger.error('WebSocket server error:', error);
     });
+  }
+
+  /**
+   * Set up file watcher for bidirectional sync
+   */
+  private setupFileWatcher(): void {
+    this.fileManager.on('fileCreated', (data: { relativePath: string; content: string; version: number }) => {
+      this.broadcastToAll({
+        type: 'FILE_CREATED',
+        payload: {
+          relativePath: data.relativePath,
+          fileContent: data.content,
+          version: data.version
+        }
+      });
+    });
+
+    this.fileManager.on('fileChanged', (data: { relativePath: string; content: string; version: number }) => {
+      this.broadcastToAll({
+        type: 'FILE_CHANGED',
+        payload: {
+          relativePath: data.relativePath,
+          fileContent: data.content,
+          version: data.version
+        }
+      });
+    });
+
+    this.fileManager.on('fileDeleted', (data: { relativePath: string }) => {
+      this.broadcastToAll({
+        type: 'FILE_DELETED',
+        payload: {
+          relativePath: data.relativePath
+        }
+      });
+    });
+
+    // Start watching for file changes
+    this.fileManager.startWatching();
   }
 
   /**
@@ -316,6 +361,9 @@ export class SyncServer {
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
     }
+    
+    // Stop file watcher
+    this.fileManager.stopWatching();
     
     this.wss.close(() => {
       logger.server('faizSync Server stopped');

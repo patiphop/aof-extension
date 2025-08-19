@@ -4,13 +4,15 @@ A powerful VSCode extension for real-time file synchronization with WebSocket su
 
 ## ✨ Features
 
-- **Real-time File Sync**: Two-way synchronization between local files and remote server
-- **Gitignore Support**: Automatically respects .gitignore patterns (including subdirectories)
-- **Binary File Filtering**: Only syncs text files, excludes images and binary files
-- **Multiple Client Support**: Multiple VSCode instances can sync to the same server
-- **WebView Dashboard**: Beautiful interface to monitor sync status and activity
-- **Git History Sync**: Synchronizes git history between clients
-- **Hardcoded Server**: Uses fixed server address `192.168.1.105:1420` for consistency
+- **🔄 Bidirectional Real-time Sync**: Full two-way synchronization between host and clients
+- **📁 File Watcher Integration**: Server detects local file changes and broadcasts to all clients
+- **🛡️ Conflict Resolution**: Handles simultaneous file modifications with versioning
+- **📋 Gitignore Support**: Automatically respects .gitignore patterns (including subdirectories)
+- **🔍 Binary File Filtering**: Only syncs text files, excludes images and binary files
+- **👥 Multiple Client Support**: Multiple VSCode instances can sync to the same server
+- **📊 WebView Dashboard**: Beautiful interface to monitor sync status and activity
+- **⚡ Real-time Updates**: Instant file synchronization across all connected clients
+- **🔄 Version Control**: File versioning prevents data loss during conflicts
 
 ## 🏗️ Architecture
 
@@ -86,6 +88,34 @@ The extension provides three main commands:
    - Opens the dashboard interface
    - Shows sync status and activity log
    - Provides buttons to control sync
+
+### Bidirectional Sync Flow
+
+The system now supports true bidirectional synchronization:
+
+1. **Client → Server**: When you modify a file in VSCode, it's immediately sent to the server
+2. **Server → Client**: When files are modified on the server (or by other clients), all connected clients receive the updates
+3. **File Watcher**: The server monitors its local file system and broadcasts changes to all clients
+4. **Conflict Resolution**: When simultaneous changes occur, the system uses versioning to prevent data loss
+
+### Example Workflow
+
+```
+Client A (VSCode) ←→ Server ←→ Client B (VSCode)
+       ↓                    ↓                    ↓
+   Edit file.txt    File watcher detects    Receives update
+   Save changes      change and broadcasts   Updates local file
+   Sends to server   to all clients         Shows notification
+```
+
+### Conflict Handling
+
+When multiple clients modify the same file simultaneously:
+
+1. **Version Detection**: Each file change includes a version number
+2. **Conflict Warning**: System logs warnings when conflicts are detected
+3. **Server Wins**: Currently, server changes take precedence (configurable)
+4. **No Data Loss**: All changes are preserved in the versioning system
 
 ### File Filtering
 
@@ -200,19 +230,24 @@ npm run lint
    - [x] Read .gitignore files (including subdirectories)
    - [x] Filter binary files and images
    - [x] Sync only text files and source code
-   - [x] Two-way binding synchronization
+   - [x] **🔄 Bidirectional synchronization (Client ↔ Server)**
+   - [x] **📁 Server file watcher integration**
+   - [x] **🛡️ Conflict resolution with versioning**
    - [x] Real-time file watching
 
 2. **WebSocket Communication**
    - [x] Connect to hardcoded server `192.168.1.105:1420`
    - [x] Support multiple clients
    - [x] Handle connection errors and reconnection
+   - [x] **📡 Server-to-client broadcast messaging**
+   - [x] **📨 Enhanced message types (FILE_CREATED, FILE_CHANGED, FILE_DELETED)**
    - [x] Structured message protocol
 
 3. **User Interface**
    - [x] VSCode commands for sync control
    - [x] WebView dashboard with status monitoring
    - [x] Activity log and error reporting
+   - [x] **🔔 Real-time sync notifications**
    - [x] User-friendly notifications
 
 4. **Git Integration**

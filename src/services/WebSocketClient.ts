@@ -4,7 +4,11 @@ import { logger } from '../utils/Logger';
 
 export interface SyncMessage {
   type: string;
-  payload?: any;
+  payload?: {
+    relativePath?: string;
+    fileContent?: string;
+    version?: number;
+  };
 }
 
 export class WebSocketClient extends EventEmitter {

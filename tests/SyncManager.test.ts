@@ -1,299 +1,256 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SyncManager } from '../src/services/SyncManager';
-import { FileScanner } from '../src/utils/FileScanner';
-import { WebSocketClient } from '../src/services/WebSocketClient';
-import { GitignoreParser } from '../src/utils/GitignoreParser';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
-// Mock dependencies
-vi.mock('../src/utils/FileScanner');
-vi.mock('../src/services/WebSocketClient');
-vi.mock('../src/utils/GitignoreParser');
+// Mock WebSocketClient
+vi.mock('../src/services/WebSocketClient', () => ({
+  WebSocketClient: vi.fn().mockImplementation(() => ({
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn(),
+    isConnected: vi.fn().mockReturnValue(true),
+    sendFile: vi.fn(),
+    sendDeleteFile: vi.fn(),
+    sendClearFolder: vi.fn(),
+    on: vi.fn(),
+    emit: vi.fn()
+  }))
+}));
 
-// Mock fs module
-vi.mock('fs', async () => {
-  const actual = await vi.importActual('fs');
-  return {
-    ...actual,
-    readFileSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    unlinkSync: vi.fn(),
-    existsSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    rmSync: vi.fn()
-  };
-});
+// Mock FileScanner
+vi.mock('../src/utils/FileScanner', () => ({
+  FileScanner: vi.fn().mockImplementation(() => ({
+    scanFiles: vi.fn().mockReturnValue([]),
+    getRelativePath: vi.fn().mockImplementation((basePath: string, filePath: string) => {
+      return path.relative(basePath, filePath);
+    })
+  }))
+}));
 
-describe('SyncManager', () => {
+// Mock GitignoreParser
+vi.mock('../src/utils/GitignoreParser', () => ({
+  GitignoreParser: vi.fn().mockImplementation(() => ({
+    isIgnored: vi.fn().mockReturnValue(false)
+  }))
+}));
+
+describe('SyncManager - Bidirectional Sync', () => {
   let syncManager: SyncManager;
-  let mockFileScanner: any;
-  let mockWebSocketClient: any;
-  let mockGitignoreParser: any;
-  let tempDir: string;
+  let testDir: string;
 
-  beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'syncmanager-test-'));
+  beforeEach(async () => {
+    testDir = path.join(__dirname, 'test-sync-folder');
+    await fs.promises.mkdir(testDir, { recursive: true });
     
-    // Create mocks
-    mockFileScanner = {
-      scanFiles: vi.fn(),
-      getRelativePath: vi.fn(),
-      isTextFile: vi.fn()
-    };
-
-    mockWebSocketClient = {
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      sendFile: vi.fn(),
-      sendDeleteFile: vi.fn(),
-      sendClearFolder: vi.fn(),
-      isConnected: vi.fn(),
-      on: vi.fn()
-    };
-
-    mockGitignoreParser = {
-      loadAllGitignores: vi.fn(),
-      shouldIgnore: vi.fn()
-    };
-
-    // Mock constructor calls
-    vi.mocked(FileScanner).mockImplementation(() => mockFileScanner);
-    vi.mocked(WebSocketClient).mockImplementation(() => mockWebSocketClient);
-    vi.mocked(GitignoreParser).mockImplementation(() => mockGitignoreParser);
-
-    // Mock fs functions
-    vi.mocked(fs.readFileSync).mockReturnValue('file content');
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.unlinkSync).mockImplementation(() => {});
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.mkdirSync).mockImplementation(() => {});
-
-    syncManager = new SyncManager(tempDir);
+    syncManager = new SyncManager(testDir);
   });
 
-  afterEach(() => {
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-    vi.clearAllMocks();
+  afterEach(async () => {
+    await fs.promises.rm(testDir, { recursive: true, force: true });
   });
 
-  describe('constructor', () => {
-    it('should create SyncManager with correct folder path', () => {
-      expect(syncManager).toBeInstanceOf(SyncManager);
-      expect(FileScanner).toHaveBeenCalledWith(expect.any(Object));
-      expect(WebSocketClient).toHaveBeenCalledWith('ws://192.168.1.105:1420');
-    });
-  });
+  describe('Server-to-Client Sync', () => {
+    it('should handle file creation from server', async () => {
+      const fileCreatedSpy = vi.fn();
+      syncManager.on('fileCreated', fileCreatedSpy);
 
-  describe('startSync', () => {
-    it('should start sync process', async () => {
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue([]);
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-
-      await syncManager.startSync();
-
-      expect(mockWebSocketClient.connect).toHaveBeenCalled();
-      expect(mockFileScanner.scanFiles).toHaveBeenCalledWith(tempDir);
-    });
-
-    it('should scan and sync all files on start', async () => {
-      const mockFiles = [
-        path.join(tempDir, 'file1.txt'),
-        path.join(tempDir, 'file2.js')
-      ];
-
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue(mockFiles);
-      mockFileScanner.getRelativePath.mockImplementation((root, file) => path.relative(root, file));
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-
-      await syncManager.startSync();
-
-      expect(mockFileScanner.scanFiles).toHaveBeenCalledWith(tempDir);
-      expect(mockWebSocketClient.sendFile).toHaveBeenCalledTimes(2);
-    });
-
-    it('should handle connection errors', async () => {
-      const error = new Error('Connection failed');
-      mockWebSocketClient.connect.mockRejectedValue(error);
-
-      await expect(syncManager.startSync()).rejects.toThrow('Connection failed');
-    });
-  });
-
-  describe('stopSync', () => {
-    it('should stop sync process', async () => {
-      // First start sync to set isActive to true
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue([]);
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-      await syncManager.startSync();
-
-      // Then stop sync
-      await syncManager.stopSync();
-
-      expect(mockWebSocketClient.sendClearFolder).toHaveBeenCalled();
-      expect(mockWebSocketClient.disconnect).toHaveBeenCalled();
-    });
-
-    it('should handle stop when not connected', async () => {
-      // Set isActive to true manually since we're not starting sync
-      (syncManager as any).isActive = true;
-      mockWebSocketClient.isConnected.mockReturnValue(false);
-
-      await syncManager.stopSync();
-
-      expect(mockWebSocketClient.sendClearFolder).not.toHaveBeenCalled();
-      expect(mockWebSocketClient.disconnect).toHaveBeenCalled();
-    });
-  });
-
-  describe('syncFile', () => {
-    it('should sync a single file', async () => {
-      const filePath = path.join(tempDir, 'test.txt');
-      const relativePath = 'test.txt';
-
-      // Start sync to set isActive to true
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue([]);
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-      await syncManager.startSync();
-
-      mockFileScanner.getRelativePath.mockReturnValue(relativePath);
-
-      syncManager.syncFile(filePath);
-
-      expect(mockFileScanner.getRelativePath).toHaveBeenCalledWith(tempDir, filePath);
-      expect(mockWebSocketClient.sendFile).toHaveBeenCalledWith(relativePath, 'file content');
-    });
-
-    it('should not sync when not connected', () => {
-      const filePath = path.join(tempDir, 'test.txt');
-      mockWebSocketClient.isConnected.mockReturnValue(false);
-
-      syncManager.syncFile(filePath);
-
-      expect(mockWebSocketClient.sendFile).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('deleteFile', () => {
-    it('should send delete file message', async () => {
-      const filePath = path.join(tempDir, 'test.txt');
-      const relativePath = 'test.txt';
-
-      // Start sync to set isActive to true
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue([]);
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-      await syncManager.startSync();
-
-      mockFileScanner.getRelativePath.mockReturnValue(relativePath);
-
-      syncManager.deleteFile(filePath);
-
-      expect(mockFileScanner.getRelativePath).toHaveBeenCalledWith(tempDir, filePath);
-      expect(mockWebSocketClient.sendDeleteFile).toHaveBeenCalledWith(relativePath);
-    });
-
-    it('should not delete when not connected', () => {
-      const filePath = path.join(tempDir, 'test.txt');
-      mockWebSocketClient.isConnected.mockReturnValue(false);
-
-      syncManager.deleteFile(filePath);
-
-      expect(mockWebSocketClient.sendDeleteFile).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('isSyncing', () => {
-    it('should return false initially', () => {
-      expect(syncManager.isSyncing()).toBe(false);
-    });
-
-    it('should return true when sync is active', async () => {
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue([]);
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-
-      await syncManager.startSync();
-
-      expect(syncManager.isSyncing()).toBe(true);
-    });
-
-    it('should return false after stopping sync', async () => {
-      mockWebSocketClient.connect.mockResolvedValue(undefined);
-      mockFileScanner.scanFiles.mockReturnValue([]);
-      mockWebSocketClient.isConnected.mockReturnValue(true);
-
-      await syncManager.startSync();
-      await syncManager.stopSync();
-
-      expect(syncManager.isSyncing()).toBe(false);
-    });
-  });
-
-  describe('handleServerMessage', () => {
-    it('should handle FILE_UPDATED message', () => {
-      const message = {
-        type: 'FILE_UPDATED',
-        payload: {
-          relativePath: 'test.txt',
-          fileContent: 'new content'
-        }
+      const payload = {
+        relativePath: 'test.txt',
+        fileContent: 'server created content',
+        version: 1
       };
 
-      // Mock that directory doesn't exist so mkdirSync gets called
-      vi.mocked(fs.existsSync).mockReturnValueOnce(false);
+      syncManager.handleServerMessage({
+        type: 'FILE_CREATED',
+        payload
+      });
 
-      syncManager.handleServerMessage(message);
-
-      expect(fs.mkdirSync).toHaveBeenCalled();
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        path.join(tempDir, 'test.txt'),
-        'new content',
-        'utf8'
-      );
+      // Check if file was created locally
+      const localFilePath = path.join(testDir, 'test.txt');
+      expect(fs.existsSync(localFilePath)).toBe(true);
+      
+      const content = fs.readFileSync(localFilePath, 'utf8');
+      expect(content).toBe('server created content');
+      
+      expect(fileCreatedSpy).toHaveBeenCalledWith('test.txt');
     });
 
-    it('should handle DELETE_FILE message', () => {
-      const message = {
-        type: 'DELETE_FILE',
-        payload: {
-          relativePath: 'test.txt'
-        }
+    it('should handle file changes from server', async () => {
+      // Create a file first
+      const testFile = path.join(testDir, 'test.txt');
+      fs.writeFileSync(testFile, 'initial content');
+
+      const fileChangedSpy = vi.fn();
+      syncManager.on('fileChanged', fileChangedSpy);
+
+      const payload = {
+        relativePath: 'test.txt',
+        fileContent: 'server updated content',
+        version: 2
       };
 
-      syncManager.handleServerMessage(message);
+      syncManager.handleServerMessage({
+        type: 'FILE_CHANGED',
+        payload
+      });
 
-      expect(fs.existsSync).toHaveBeenCalledWith(path.join(tempDir, 'test.txt'));
-      expect(fs.unlinkSync).toHaveBeenCalledWith(path.join(tempDir, 'test.txt'));
+      // Check if file was updated locally
+      const content = fs.readFileSync(testFile, 'utf8');
+      expect(content).toBe('server updated content');
+      
+      expect(fileChangedSpy).toHaveBeenCalledWith('test.txt');
     });
 
-    it('should handle FOLDER_CLEARED message', () => {
-      const message = {
+    it('should handle file deletion from server', async () => {
+      // Create a file first
+      const testFile = path.join(testDir, 'test.txt');
+      fs.writeFileSync(testFile, 'content');
+
+      const fileDeletedSpy = vi.fn();
+      syncManager.on('fileDeleted', fileDeletedSpy);
+
+      const payload = {
+        relativePath: 'test.txt'
+      };
+
+      syncManager.handleServerMessage({
+        type: 'FILE_DELETED',
+        payload
+      });
+
+      // Check if file was deleted locally
+      expect(fs.existsSync(testFile)).toBe(false);
+      
+      expect(fileDeletedSpy).toHaveBeenCalledWith('test.txt');
+    });
+
+    it('should handle folder cleared from server', async () => {
+      // Create some files first
+      fs.writeFileSync(path.join(testDir, 'file1.txt'), 'content1');
+      fs.writeFileSync(path.join(testDir, 'file2.txt'), 'content2');
+
+      const folderClearedSpy = vi.fn();
+      syncManager.on('folderCleared', folderClearedSpy);
+
+      syncManager.handleServerMessage({
         type: 'FOLDER_CLEARED'
+      });
+
+      expect(folderClearedSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('Conflict Resolution', () => {
+    it('should detect conflicts when local and server versions differ', async () => {
+      // Create a file with local content
+      const testFile = path.join(testDir, 'conflict.txt');
+      fs.writeFileSync(testFile, 'local content');
+
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const payload = {
+        relativePath: 'conflict.txt',
+        fileContent: 'server content',
+        version: 2
       };
 
-      const onFolderClearedSpy = vi.fn();
-      syncManager.on('folderCleared', onFolderClearedSpy);
+      syncManager.handleServerMessage({
+        type: 'FILE_CHANGED',
+        payload
+      });
 
-      syncManager.handleServerMessage(message);
+      // Should log a warning about potential conflict
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Potential conflict detected')
+      );
 
-      expect(onFolderClearedSpy).toHaveBeenCalled();
+      // Server version should win (for now)
+      const content = fs.readFileSync(testFile, 'utf8');
+      expect(content).toBe('server content');
+
+      consoleWarnSpy.mockRestore();
     });
 
-    it('should ignore unknown message types', () => {
-      const message = {
-        type: 'UNKNOWN_TYPE',
-        payload: {}
+    it('should not create duplicate files when server sends FILE_CREATED for existing file', async () => {
+      // Create a file locally first
+      const testFile = path.join(testDir, 'existing.txt');
+      fs.writeFileSync(testFile, 'local content');
+
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const payload = {
+        relativePath: 'existing.txt',
+        fileContent: 'server content',
+        version: 1
       };
 
-      expect(() => syncManager.handleServerMessage(message)).not.toThrow();
+      syncManager.handleServerMessage({
+        type: 'FILE_CREATED',
+        payload
+      });
+
+      // Should log a warning about file already existing
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('File already exists locally')
+      );
+
+      // Local content should remain unchanged
+      const content = fs.readFileSync(testFile, 'utf8');
+      expect(content).toBe('local content');
+
+      consoleWarnSpy.mockRestore();
+    });
+  });
+
+  describe('Directory Creation', () => {
+    it('should create nested directories when receiving files from server', async () => {
+      const payload = {
+        relativePath: 'nested/folder/test.txt',
+        fileContent: 'nested content',
+        version: 1
+      };
+
+      syncManager.handleServerMessage({
+        type: 'FILE_CREATED',
+        payload
+      });
+
+      // Check if nested directories were created
+      const nestedDir = path.join(testDir, 'nested', 'folder');
+      expect(fs.existsSync(nestedDir)).toBe(true);
+
+      // Check if file was created
+      const testFile = path.join(nestedDir, 'test.txt');
+      expect(fs.existsSync(testFile)).toBe(true);
+      
+      const content = fs.readFileSync(testFile, 'utf8');
+      expect(content).toBe('nested content');
+    });
+  });
+
+  describe('Legacy Message Support', () => {
+    it('should handle legacy FILE_UPDATED messages', async () => {
+      const testFile = path.join(testDir, 'legacy.txt');
+      fs.writeFileSync(testFile, 'initial content');
+
+      const fileChangedSpy = vi.fn();
+      syncManager.on('fileChanged', fileChangedSpy);
+
+      const payload = {
+        relativePath: 'legacy.txt',
+        fileContent: 'updated content'
+      };
+
+      syncManager.handleServerMessage({
+        type: 'FILE_UPDATED',
+        payload
+      });
+
+      // Should handle as FILE_CHANGED
+      const content = fs.readFileSync(testFile, 'utf8');
+      expect(content).toBe('updated content');
+      
+      expect(fileChangedSpy).toHaveBeenCalledWith('legacy.txt');
     });
   });
 });

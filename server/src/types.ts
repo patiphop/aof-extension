@@ -54,4 +54,23 @@ export interface FileInfo {
   content: string;
   lastModified: number;
   lastClientId: string;
+  version: number;
+}
+
+export interface FileCreatedMessage extends SyncMessage {
+  type: 'FILE_CREATED';
+  payload: {
+    relativePath: string;
+    fileContent: string;
+    version: number;
+  };
+}
+
+export interface FileChangedMessage extends SyncMessage {
+  type: 'FILE_CHANGED';
+  payload: {
+    relativePath: string;
+    fileContent: string;
+    version: number;
+  };
 }
