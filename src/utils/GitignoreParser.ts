@@ -37,8 +37,13 @@ export class GitignoreParser {
   /**
    * Check if a file path should be ignored based on gitignore patterns
    */
-  shouldIgnore(filePath: string, patterns: string[]): boolean {
+  shouldIgnore(filePath: string, patterns: string[], syncGitFolder: boolean = false): boolean {
     const normalizedPath = filePath.replace(/\\/g, '/');
+    
+    // If syncGitFolder is enabled, don't ignore .git folder
+    if (syncGitFolder && normalizedPath.startsWith('.git/')) {
+      return false;
+    }
     
     // First check for negated patterns
     for (const pattern of patterns) {

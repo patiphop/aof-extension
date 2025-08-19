@@ -13,7 +13,7 @@ describe('FileScanner', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescanner-test-'));
     gitignoreParser = new GitignoreParser();
-    scanner = new FileScanner(gitignoreParser);
+    scanner = new FileScanner(gitignoreParser, false);
   });
 
   afterEach(() => {
@@ -142,6 +142,87 @@ describe('FileScanner', () => {
       
       const relativePath = scanner.getRelativePath(rootPath, filePath);
       expect(relativePath).toBe('package.json');
+    });
+  });
+
+  describe('Git folder scanning', () => {
+    it('should not scan .git folder when syncGitFolder is false', () => {
+      scanner = new FileScanner(gitignoreParser, false);
+      
+      // Create .git folder structure
+      const gitDir = path.join(tempDir, '.git');
+      fs.mkdirSync(gitDir);
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main');
+      fs.writeFileSync(path.join(gitDir, 'config'), '[core]\nrepositoryformatversion = 0');
+      
+      const files = scanner.scanFiles(tempDir);
+      const gitFiles = files.filter(f => f.includes('.git'));
+      
+      expect(gitFiles).toHaveLength(0);
+    });
+
+    it('should scan .git folder when syncGitFolder is true', () => {
+      scanner = new FileScanner(gitignoreParser, true);
+      
+      // Create .git folder structure
+      const gitDir = path.join(tempDir, '.git');
+      fs.mkdirSync(gitDir);
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main');
+      fs.writeFileSync(path.join(gitDir, 'config'), '[core]\nrepositoryformatversion = 0');
+      
+      const files = scanner.scanFiles(tempDir);
+      const gitFiles = files.filter(f => f.includes('.git'));
+      
+      expect(gitFiles.length).toBeGreaterThan(0);
+      expect(gitFiles.some(f => f.includes('HEAD'))).toBe(true);
+      expect(gitFiles.some(f => f.includes('config'))).toBe(true);
+    });
+
+    it('should scan git subdirectories when syncGitFolder is true', () => {
+      scanner = new FileScanner(gitignoreParser, true);
+      
+      // Create .git folder structure with subdirectories
+      const gitDir = path.join(tempDir, '.git');
+      fs.mkdirSync(gitDir);
+      
+      // Create refs directory
+      const refsDir = path.join(gitDir, 'refs');
+      fs.mkdirSync(refsDir);
+      const headsDir = path.join(refsDir, 'heads');
+      fs.mkdirSync(headsDir);
+      fs.writeFileSync(path.join(headsDir, 'main'), 'abc123');
+      
+      // Create objects directory
+      const objectsDir = path.join(gitDir, 'objects');
+      fs.mkdirSync(objectsDir);
+      fs.writeFileSync(path.join(objectsDir, 'packed-refs'), 'abc123 refs/heads/main');
+      
+      const files = scanner.scanFiles(tempDir);
+      const gitFiles = files.filter(f => f.includes('.git'));
+      
+      expect(gitFiles.length).toBeGreaterThan(0);
+      expect(gitFiles.some(f => f.includes('packed-refs'))).toBe(true);
+    });
+
+    it('should not include binary files from .git directory', () => {
+      scanner = new FileScanner(gitignoreParser, true);
+      
+      // Create .git folder structure
+      const gitDir = path.join(tempDir, '.git');
+      fs.mkdirSync(gitDir);
+      
+      // Create text file
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main');
+      
+      // Create binary file (simulated)
+      const binaryData = Buffer.from([0x89, 0x50, 0x4E, 0x47]); // PNG header
+      fs.writeFileSync(path.join(gitDir, 'binary.dat'), binaryData);
+      
+      const files = scanner.scanFiles(tempDir);
+      const gitFiles = files.filter(f => f.includes('.git'));
+      
+      expect(gitFiles.some(f => f.includes('HEAD'))).toBe(true);
+      expect(gitFiles.some(f => f.includes('binary.dat'))).toBe(false);
     });
   });
 });

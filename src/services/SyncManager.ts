@@ -20,12 +20,14 @@ export class SyncManager extends EventEmitter {
   private webSocketClient: WebSocketClient;
   private localFolderPath: string;
   private isActive = false;
+  private syncGitFolder: boolean;
 
-  constructor(localFolderPath: string) {
+  constructor(localFolderPath: string, syncGitFolder: boolean = false) {
     super();
     this.localFolderPath = localFolderPath;
+    this.syncGitFolder = syncGitFolder;
     const gitignoreParser = new GitignoreParser();
-    this.fileScanner = new FileScanner(gitignoreParser);
+    this.fileScanner = new FileScanner(gitignoreParser, syncGitFolder);
     this.webSocketClient = new WebSocketClient('ws://192.168.1.105:1420');
     
     this.setupWebSocketListeners();
@@ -120,6 +122,13 @@ export class SyncManager extends EventEmitter {
    */
   getLocalFolderPath(): string {
     return this.localFolderPath;
+  }
+
+  /**
+   * Check if git folder sync is enabled
+   */
+  isGitFolderSyncEnabled(): boolean {
+    return this.syncGitFolder;
   }
 
   /**

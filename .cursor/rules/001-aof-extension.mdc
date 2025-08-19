@@ -1,17 +1,10 @@
----
-description: "Project-wide rules for aof-extension (VS Code extension + Node server)"
-alwaysApply: true
-globs:
-  - "**/*.ts"
-  - "**/*.tsx"
-  - "server/**/*.ts"
----
 
 ## Overview
 - **Stack**: VS Code Extension (TypeScript, Webpack), Node server (TypeScript), WebSocket via `ws`, Vitest, ESLint.
 - **Entry points**: `src/extension.ts` (extension), `server/src/server.ts` (server).
 - **Key services**: `src/services/SyncManager.ts`, `src/services/WebSocketClient.ts`.
 - **Key utils**: `src/utils/FileScanner.ts`, `src/utils/GitignoreParser.ts`, `src/utils/Logger.ts`.
+- **Features**: Real-time file sync, bidirectional sync, git folder sync (optional), .gitignore support, binary file filtering.
 
 ## Commands & Scripts
 - Root: `bundle`, `watch`, `compile`, `lint`, `test`, `test:watch`, `test:coverage`, `build`.
@@ -22,6 +15,7 @@ globs:
 - Sync flow: file events → `SyncManager.syncFile`/`deleteFile` → `WebSocketClient.send*` → server. Server events → `SyncManager.handleServerMessage` → local FS ops + events.
 - Path handling: normalize to forward slashes in protocol payloads; use `path.join` for local paths; never assume POSIX.
 - `.gitignore` semantics: use `GitignoreParser.loadAllGitignores` and negation handling; directory patterns with trailing `/` must be treated as directories.
+- **Git folder sync**: `SyncManager` constructor accepts `syncGitFolder` boolean; when true, `.git` folder is scanned selectively (text files only, excludes binaries).
 - Networking: messages are JSON `{ type, payload? }`. Reconnect must be bounded and idempotent.
 - Logging: use the `logger` singleton; in extension mode prefer `logger.extension`, `logger.sync`, `logger.connection`. Avoid noisy logs.
 
@@ -34,23 +28,27 @@ globs:
 - Formatting: match existing style; do not reformat unrelated code in edits.
 
 ## Testing
-- Add/update tests for features and bug fixes. Focus on: path normalization, gitignore precedence, text vs binary detection, reconnect bounds.
+- Add/update tests for features and bug fixes. Focus on: path normalization, gitignore precedence, text vs binary detection, reconnect bounds, git folder sync behavior.
 - Ensure `npm test` passes; use coverage as needed.
 - Utils get unit tests; `WebSocketClient`/`SyncManager` use event-driven tests with stubs/mocks.
+- **Git folder sync tests**: Test both enabled/disabled states, git file filtering, binary exclusion.
 
 ## Safety & Compatibility
 - Do not change command IDs: `faizsync.startSync`, `faizsync.stopSync`, `faizsync.openWebView`.
 - Do not change protocol types silently: `SYNC_FILE`, `DELETE_FILE`, `CLEAR_FOLDER`, server `FILE_*`, `FOLDER_CLEARED`. If changing, version the protocol.
 - Filesystem: create parent directories before writes; avoid destructive ops unless requested by server message.
 - WebSocket URL currently hardcoded; if adding config, keep default and document migration.
+- **Git folder sync**: Backward compatible, disabled by default; respect user choice in UI.
 
 ## Performance
 - Scanning must short-circuit when root is missing; log directory scan errors individually.
 - Skip binary files by extension; treat unknown/no-extension as text only when safe.
 - Watchers: process only within selected folder; debounce/throttle bursts if bulk operations are added.
+- **Git folder sync**: Selective scanning of .git directory; exclude binary files, large objects, temporary files.
 
 ## Extension UX
 - Use `vscode.window.show*Message` sparingly (start/stop, connected/disconnected, conflicts). Use progress where operations are long.
+- **Git folder sync**: Use QuickPick dialog for sync options; show clear descriptions of git folder sync implications.
 
 ## Editing Workflow (for AI)
 - Always follow these rules.
@@ -60,6 +58,14 @@ globs:
 - Preserve indentation style; never reindent unrelated lines.
 
 ## Playbooks
+- New config (e.g., WS URL): add setting/env with default, thread via `SyncManager` ctor, add tests.
+- New server message: extend types and switch in `handleServerMessage`, implement handler like `handleFile*`, emit events, add tests.
+- Scanning perf: profile `scanFiles`, reduce sync IO in hot paths, keep `.gitignore` behavior; add tests.
+- **Git folder sync feature**: Add `syncGitFolder` parameter to `SyncManager` ctor, update `FileScanner` with git-specific methods, modify `GitignoreParser.shouldIgnore()` to accept syncGitFolder param, add UI option in extension, comprehensive tests for all components.
+
+## References
+- `src/extension.ts`, `src/services/SyncManager.ts`, `src/services/WebSocketClient.ts`, `src/utils/FileScanner.ts`, `src/utils/GitignoreParser.ts`, `src/utils/Logger.ts`, `server/`.
+- **Git sync docs**: `GIT_SYNC_EXAMPLE.md`, `GIT_SYNC_CHANGES.md`.
 - New config (e.g., WS URL): add setting/env with default, thread via `SyncManager` ctor, add tests.
 - New server message: extend types and switch in `handleServerMessage`, implement handler like `handleFile*`, emit events, add tests.
 - Scanning perf: profile `scanFiles`, reduce sync IO in hot paths, keep `.gitignore` behavior; add tests.

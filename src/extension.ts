@@ -60,8 +60,32 @@ async function startSync(): Promise<void> {
 
     const localFolderPath = folderUri[0].fsPath;
 
+    // Show sync options
+    const syncOptions = await vscode.window.showQuickPick([
+      {
+        label: '$(sync) Sync project files only',
+        description: 'Sync source code and project files (excludes .git folder)',
+        value: false
+      },
+      {
+        label: '$(git-branch) Sync project files + Git folder',
+        description: 'Sync source code, project files, and .git folder for branch switching',
+        value: true
+      }
+    ], {
+      placeHolder: 'Choose sync options',
+      ignoreFocusOut: true
+    });
+
+    if (!syncOptions) {
+      vscode.window.showInformationMessage('Sync cancelled.');
+      return;
+    }
+
+    const syncGitFolder = syncOptions.value;
+
     // Create sync manager
-    syncManager = new SyncManager(localFolderPath);
+    syncManager = new SyncManager(localFolderPath, syncGitFolder);
 
     // Set up event listeners
     setupSyncEventListeners();
@@ -69,7 +93,8 @@ async function startSync(): Promise<void> {
     // Start sync
     await syncManager.startSync();
 
-    vscode.window.showInformationMessage(`Sync started for folder: ${localFolderPath}`);
+    const gitMessage = syncGitFolder ? ' (including .git folder)' : '';
+    vscode.window.showInformationMessage(`Sync started for folder: ${localFolderPath}${gitMessage}`);
 
     // Set up file watchers
     setupFileWatchers(localFolderPath);

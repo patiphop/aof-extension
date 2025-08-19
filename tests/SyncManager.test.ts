@@ -253,4 +253,21 @@ describe('SyncManager - Bidirectional Sync', () => {
       expect(fileChangedSpy).toHaveBeenCalledWith('legacy.txt');
     });
   });
+
+  describe('Git folder sync', () => {
+    it('should create SyncManager with git folder sync disabled by default', () => {
+      const syncManager = new SyncManager('/test/path');
+      expect(syncManager.isGitFolderSyncEnabled()).toBe(false);
+    });
+
+    it('should create SyncManager with git folder sync enabled', () => {
+      const syncManager = new SyncManager('/test/path', true);
+      expect(syncManager.isGitFolderSyncEnabled()).toBe(true);
+    });
+
+    it('should create SyncManager with git folder sync disabled explicitly', () => {
+      const syncManager = new SyncManager('/test/path', false);
+      expect(syncManager.isGitFolderSyncEnabled()).toBe(false);
+    });
+  });
 });
