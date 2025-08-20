@@ -13,7 +13,7 @@ describe('FileScanner', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filescanner-test-'));
     gitignoreParser = new GitignoreParser();
-    scanner = new FileScanner(gitignoreParser, false);
+    scanner = new FileScanner(gitignoreParser, true);
   });
 
   afterEach(() => {
@@ -204,7 +204,7 @@ describe('FileScanner', () => {
       expect(gitFiles.some(f => f.includes('packed-refs'))).toBe(true);
     });
 
-    it('should not include binary files from .git directory', () => {
+    it('should include binary files from .git directory for complete git functionality', () => {
       scanner = new FileScanner(gitignoreParser, true);
       
       // Create .git folder structure
@@ -218,11 +218,48 @@ describe('FileScanner', () => {
       const binaryData = Buffer.from([0x89, 0x50, 0x4E, 0x47]); // PNG header
       fs.writeFileSync(path.join(gitDir, 'binary.dat'), binaryData);
       
+      // Create git index file (binary but essential)
+      const indexData = Buffer.from([0x44, 0x49, 0x52, 0x43]); // DIRC signature
+      fs.writeFileSync(path.join(gitDir, 'index'), indexData);
+      
       const files = scanner.scanFiles(tempDir);
       const gitFiles = files.filter(f => f.includes('.git'));
       
       expect(gitFiles.some(f => f.includes('HEAD'))).toBe(true);
-      expect(gitFiles.some(f => f.includes('binary.dat'))).toBe(false);
+      expect(gitFiles.some(f => f.includes('binary.dat'))).toBe(true);
+      expect(gitFiles.some(f => f.includes('index'))).toBe(true);
+    });
+
+    it('should include git objects directory files for complete git functionality', () => {
+      scanner = new FileScanner(gitignoreParser, true);
+      
+      // Create .git folder structure with objects directory
+      const gitDir = path.join(tempDir, '.git');
+      fs.mkdirSync(gitDir);
+      
+      // Create objects directory structure
+      const objectsDir = path.join(gitDir, 'objects');
+      fs.mkdirSync(objectsDir);
+      
+      // Create subdirectories like git does (00, 01, etc.)
+      const subDir = path.join(objectsDir, '00');
+      fs.mkdirSync(subDir);
+      
+      // Create git object files
+      fs.writeFileSync(path.join(subDir, 'abc123'), 'git object content');
+      fs.writeFileSync(path.join(subDir, 'def456'), 'another git object');
+      
+      // Create another subdirectory
+      const subDir2 = path.join(objectsDir, '01');
+      fs.mkdirSync(subDir2);
+      fs.writeFileSync(path.join(subDir2, 'ghi789'), 'more git objects');
+      
+      const files = scanner.scanFiles(tempDir);
+      const gitFiles = files.filter(f => f.includes('.git'));
+      
+      expect(gitFiles.some(f => f.includes('objects/00/abc123'))).toBe(true);
+      expect(gitFiles.some(f => f.includes('objects/00/def456'))).toBe(true);
+      expect(gitFiles.some(f => f.includes('objects/01/ghi789'))).toBe(true);
     });
   });
 });

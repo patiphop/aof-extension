@@ -22,7 +22,7 @@ export class SyncManager extends EventEmitter {
   private isActive = false;
   private syncGitFolder: boolean;
 
-  constructor(localFolderPath: string, syncGitFolder: boolean = false) {
+  constructor(localFolderPath: string, syncGitFolder: boolean = true) {
     super();
     this.localFolderPath = localFolderPath;
     this.syncGitFolder = syncGitFolder;

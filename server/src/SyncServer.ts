@@ -22,7 +22,7 @@ export class SyncServer {
 
   constructor(port: number = 1420) {
     this.port = port;
-    const baseDir = process.env.BASE_DIR || './synced-files';
+    const baseDir = '/Users/patiphopungudchuak/Documents/workspaces/sync-local-files';
     this.fileManager = new FileManager(baseDir);
     this.wss = new WebSocketServer({ port });
     

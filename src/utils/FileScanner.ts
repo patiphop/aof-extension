@@ -37,14 +37,28 @@ export class FileScanner {
   private readonly gitFileNames = [
     'HEAD', 'config', 'description', 'FETCH_HEAD', 'ORIG_HEAD', 'MERGE_HEAD',
     'MERGE_MODE', 'MERGE_MSG', 'PACKED_REFS', 'REBASE_HEAD', 'REBASE_MERGE',
-    'SQUASH_MSG', 'TAG_EDITMSG', 'COMMIT_EDITMSG', 'MERGE_HEAD', 'CHERRY_PICK_HEAD'
+    'SQUASH_MSG', 'TAG_EDITMSG', 'COMMIT_EDITMSG', 'MERGE_HEAD', 'CHERRY_PICK_HEAD',
+    'index', 'packed-refs', 'shallow', 'FETCH_HEAD', 'ORIG_HEAD', 'MERGE_HEAD',
+    'MERGE_MODE', 'MERGE_MSG', 'REBASE_HEAD', 'REBASE_MERGE', 'SQUASH_MSG',
+    'TAG_EDITMSG', 'COMMIT_EDITMSG', 'CHERRY_PICK_HEAD', 'BISECT_LOG',
+    'BISECT_NAMES', 'BISECT_RUN', 'BISECT_START', 'BISECT_TERMS'
   ];
 
   private readonly gitDirNames = [
     'objects', 'refs', 'hooks', 'info', 'logs'
   ];
 
-  constructor(private gitignoreParser: GitignoreParser, private syncGitFolder: boolean = false) {}
+  // Git binary files that are essential for git operations
+  private readonly gitBinaryFileNames = [
+    'index', 'pack-*.idx', 'pack-*.pack', '*.lock'
+  ];
+
+  // Git directories that should be synced completely
+  private readonly gitEssentialDirs = [
+    'objects', 'refs', 'info'
+  ];
+
+  constructor(private gitignoreParser: GitignoreParser, private syncGitFolder: boolean = true) {}
 
   /**
    * Check if a file is a text file based on its extension or name
@@ -109,7 +123,10 @@ export class FileScanner {
             // Check if file should be ignored
             const relativeFilePath = this.getRelativePath(rootPath, itemPath);
             if (!this.gitignoreParser.shouldIgnore(relativeFilePath, gitignorePatterns, this.syncGitFolder)) {
-              if (this.isTextFile(item)) {
+              // For .git folder, include both text and binary files
+              if (relativeFilePath.startsWith('.git/')) {
+                files.push(itemPath);
+              } else if (this.isTextFile(item)) {
                 files.push(itemPath);
               }
             }
@@ -129,22 +146,23 @@ export class FileScanner {
    */
   private scanGitDirectory(gitPath: string, files: string[], rootPath: string): void {
     try {
-      // Scan git config and other important files
-      for (const fileName of this.gitFileNames) {
-        const filePath = path.join(gitPath, fileName);
-        if (fs.existsSync(filePath)) {
-          const stats = fs.statSync(filePath);
-          if (stats.isFile()) {
-            files.push(filePath);
-          }
+      // Scan all files in .git root directory
+      const gitRootItems = fs.readdirSync(gitPath);
+      for (const item of gitRootItems) {
+        const itemPath = path.join(gitPath, item);
+        const stats = fs.statSync(itemPath);
+        
+        if (stats.isFile()) {
+          // Include all files in .git root (they are all important)
+          files.push(itemPath);
         }
       }
 
-      // Scan important git directories
+      // Scan important git directories more comprehensively
       for (const dirName of this.gitDirNames) {
         const dirPath = path.join(gitPath, dirName);
         if (fs.existsSync(dirPath)) {
-          this.scanGitSubDirectory(dirPath, files, rootPath);
+          this.scanGitSubDirectory(dirPath, files, rootPath, dirName);
         }
       }
     } catch (error) {
@@ -155,7 +173,7 @@ export class FileScanner {
   /**
    * Scan git subdirectories (refs, objects, etc.)
    */
-  private scanGitSubDirectory(dirPath: string, files: string[], rootPath: string): void {
+  private scanGitSubDirectory(dirPath: string, files: string[], rootPath: string, parentDirName?: string): void {
     try {
       const items = fs.readdirSync(dirPath);
       
@@ -165,10 +183,10 @@ export class FileScanner {
         
         if (stats.isDirectory()) {
           // Recursively scan subdirectories
-          this.scanGitSubDirectory(itemPath, files, rootPath);
+          this.scanGitSubDirectory(itemPath, files, rootPath, item);
         } else if (stats.isFile()) {
-          // Only include text files from git directories
-          if (this.isGitTextFile(item)) {
+          // Include files based on directory type
+          if (this.shouldIncludeGitFile(item, parentDirName)) {
             files.push(itemPath);
           }
         }
@@ -179,34 +197,61 @@ export class FileScanner {
   }
 
   /**
-   * Check if a file in .git directory is a text file that should be synced
+   * Determine if a git file should be included based on its location and type
    */
-  private isGitTextFile(fileName: string): boolean {
-    const lowerFileName = fileName.toLowerCase();
-    
-    // Include common git text files
+  private shouldIncludeGitFile(fileName: string, parentDirName?: string): boolean {
+    // Always include files in essential directories (objects, refs, info)
+    if (parentDirName && this.gitEssentialDirs.includes(parentDirName)) {
+      return true;
+    }
+
+    // Always include files in objects subdirectories (like 00, 01, etc.)
+    if (parentDirName && parentDirName.match(/^[0-9a-f]{2}$/)) {
+      return true;
+    }
+
+    // Include specific git files regardless of location
     if (this.gitFileNames.includes(fileName)) {
       return true;
     }
-    
+
+    // Include git binary files that are essential
+    for (const pattern of this.gitBinaryFileNames) {
+      if (this.matchesPattern(fileName, pattern)) {
+        return true;
+      }
+    }
+
     // Include files with common text extensions
-    const ext = path.extname(lowerFileName);
+    const ext = path.extname(fileName.toLowerCase());
     if (this.textFileExtensions.includes(ext)) {
       return true;
     }
-    
+
     // Include specific git files without extensions
-    if (['packed-refs', 'HEAD', 'config', 'description'].includes(fileName)) {
+    if (['packed-refs', 'HEAD', 'config', 'description', 'index'].includes(fileName)) {
       return true;
     }
-    
-    // Exclude binary files
-    if (this.binaryFileExtensions.includes(ext)) {
-      return false;
-    }
-    
-    // For git directories, be more conservative - only include known text files
+
+    // For other files, be more conservative
     return false;
+  }
+
+  /**
+   * Check if a filename matches a pattern (simple wildcard matching)
+   */
+  private matchesPattern(fileName: string, pattern: string): boolean {
+    if (pattern === '*') return true;
+    if (pattern.startsWith('*') && pattern.endsWith('*')) {
+      return fileName.includes(pattern.slice(1, -1));
+    }
+    if (pattern.startsWith('*')) {
+      return fileName.endsWith(pattern.slice(1));
+    }
+    if (pattern.endsWith('*')) {
+      return fileName.startsWith(pattern.slice(0, -1));
+    }
+    return fileName === pattern;
   }
 
   /**

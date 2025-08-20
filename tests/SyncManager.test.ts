@@ -255,12 +255,12 @@ describe('SyncManager - Bidirectional Sync', () => {
   });
 
   describe('Git folder sync', () => {
-    it('should create SyncManager with git folder sync disabled by default', () => {
+    it('should create SyncManager with git folder sync enabled by default', () => {
       const syncManager = new SyncManager('/test/path');
-      expect(syncManager.isGitFolderSyncEnabled()).toBe(false);
+      expect(syncManager.isGitFolderSyncEnabled()).toBe(true);
     });
 
-    it('should create SyncManager with git folder sync enabled', () => {
+    it('should create SyncManager with git folder sync enabled explicitly', () => {
       const syncManager = new SyncManager('/test/path', true);
       expect(syncManager.isGitFolderSyncEnabled()).toBe(true);
     });

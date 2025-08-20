@@ -38,7 +38,8 @@
 - Do not change protocol types silently: `SYNC_FILE`, `DELETE_FILE`, `CLEAR_FOLDER`, server `FILE_*`, `FOLDER_CLEARED`. If changing, version the protocol.
 - Filesystem: create parent directories before writes; avoid destructive ops unless requested by server message.
 - WebSocket URL currently hardcoded; if adding config, keep default and document migration.
-- **Git folder sync**: Backward compatible, disabled by default; respect user choice in UI.
+- **Git folder sync**: Enabled by default; automatically syncs .git folder for complete git functionality.
+- **Server sync directory**: Hardcoded to `/Users/patiphopungudchuak/Documents/workspaces/sync-local-files`; do not change without updating documentation.
 
 ## Performance
 - Scanning must short-circuit when root is missing; log directory scan errors individually.
@@ -48,7 +49,7 @@
 
 ## Extension UX
 - Use `vscode.window.show*Message` sparingly (start/stop, connected/disconnected, conflicts). Use progress where operations are long.
-- **Git folder sync**: Use QuickPick dialog for sync options; show clear descriptions of git folder sync implications.
+- **Git folder sync**: Automatically enabled by default; no user selection required for git functionality.
 
 ## Editing Workflow (for AI)
 - Always follow these rules.
