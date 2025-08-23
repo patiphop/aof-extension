@@ -6,35 +6,13 @@ A VS Code extension for real-time file synchronization between multiple clients 
 
 - **Real-time file synchronization** between multiple VS Code instances
 - **Bidirectional sync** - changes from any client are synced to all others
-- **Git folder synchronization** - optionally sync .git folder for branch switching support
 - **Smart file filtering** - respects .gitignore patterns and excludes binary files
 - **Conflict detection** - warns when local and server versions differ
 - **WebSocket-based** communication for low latency
 - **Automatic reconnection** with exponential backoff
 - **Progress tracking** and status notifications
 
-## Git Folder Sync Feature
 
-The extension now supports syncing the `.git` folder, enabling branch switching on the host machine. When starting sync, you can choose between:
-
-1. **Project files only** - Syncs source code and project files (excludes .git folder)
-2. **Project files + Git folder** - Syncs source code, project files, and .git folder for branch switching
-
-### What gets synced from .git folder:
-
-- **Git configuration files**: `HEAD`, `config`, `description`
-- **Reference files**: `packed-refs`, `FETCH_HEAD`, `ORIG_HEAD`
-- **Branch and tag references**: Files in `refs/heads/`, `refs/tags/`
-- **Git hooks**: Text files in `hooks/` directory
-- **Git info**: Text files in `info/` directory
-
-### What's excluded:
-
-- **Binary files**: Object files, pack files, index files
-- **Large files**: Log files and other potentially large files
-- **Temporary files**: Lock files, temporary merge files
-
-This selective syncing ensures that you can switch branches on the host machine while keeping the sync efficient and avoiding large binary files.
 
 ## 🏗️ Architecture
 
@@ -272,10 +250,10 @@ npm run lint
    - [x] **🔔 Real-time sync notifications**
    - [x] User-friendly notifications
 
-4. **Git Integration**
+4. **Gitignore Support**
    - [x] Parse and respect .gitignore patterns
-   - [x] Support for git history synchronization
-   - [x] Handle git-related file operations
+   - [x] Exclude .git folder from synchronization
+   - [x] Handle gitignore patterns in subdirectories
 
 ### Technical Requirements
 

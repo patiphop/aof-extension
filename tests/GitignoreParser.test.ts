@@ -140,32 +140,24 @@ describe('GitignoreParser', () => {
     });
   });
 
-  describe('shouldIgnore with git folder sync', () => {
-    it('should not ignore .git folder when syncGitFolder is true', () => {
-      const patterns = ['.git/', 'node_modules/'];
-      const parser = new GitignoreParser();
-      
-      expect(parser.shouldIgnore('.git/HEAD', patterns, true)).toBe(false);
-      expect(parser.shouldIgnore('.git/config', patterns, true)).toBe(false);
-      expect(parser.shouldIgnore('.git/refs/heads/main', patterns, true)).toBe(false);
-      expect(parser.shouldIgnore('node_modules/package.json', patterns, true)).toBe(true);
-    });
-
-    it('should ignore .git folder when syncGitFolder is false', () => {
-      const patterns = ['.git/', 'node_modules/'];
-      const parser = new GitignoreParser();
-      
-      expect(parser.shouldIgnore('.git/HEAD', patterns, false)).toBe(true);
-      expect(parser.shouldIgnore('.git/config', patterns, false)).toBe(true);
-      expect(parser.shouldIgnore('.git/refs/heads/main', patterns, false)).toBe(true);
-    });
-
-    it('should ignore .git folder by default when syncGitFolder is not specified', () => {
+  describe('shouldIgnore with .git folder', () => {
+    it('should always ignore .git folder', () => {
       const patterns = ['.git/', 'node_modules/'];
       const parser = new GitignoreParser();
       
       expect(parser.shouldIgnore('.git/HEAD', patterns)).toBe(true);
       expect(parser.shouldIgnore('.git/config', patterns)).toBe(true);
+      expect(parser.shouldIgnore('.git/refs/heads/main', patterns)).toBe(true);
+      expect(parser.shouldIgnore('node_modules/package.json', patterns)).toBe(true);
+    });
+
+    it('should ignore .git folder even with negated patterns', () => {
+      const patterns = ['!important.log', '.git/'];
+      const parser = new GitignoreParser();
+      
+      expect(parser.shouldIgnore('.git/HEAD', patterns)).toBe(true);
+      expect(parser.shouldIgnore('.git/config', patterns)).toBe(true);
+      expect(parser.shouldIgnore('important.log', patterns)).toBe(false);
     });
   });
 });

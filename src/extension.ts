@@ -60,8 +60,8 @@ async function startSync(): Promise<void> {
 
     const localFolderPath = folderUri[0].fsPath;
 
-    // Create sync manager with git folder sync enabled by default
-    syncManager = new SyncManager(localFolderPath, true);
+    // Create sync manager
+    syncManager = new SyncManager(localFolderPath);
 
     // Set up event listeners
     setupSyncEventListeners();
@@ -69,7 +69,7 @@ async function startSync(): Promise<void> {
     // Start sync
     await syncManager.startSync();
 
-    vscode.window.showInformationMessage(`Sync started for folder: ${localFolderPath} (including .git folder)`);
+    vscode.window.showInformationMessage(`Sync started for folder: ${localFolderPath}`);
 
     // Set up file watchers
     setupFileWatchers(localFolderPath);

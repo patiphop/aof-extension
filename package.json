@@ -76,8 +76,7 @@
     "vscode",
     "extension",
     "sync",
-    "websocket",
-    "git"
+    "websocket"
   ],
   "author": "",
   "license": "ISC",
