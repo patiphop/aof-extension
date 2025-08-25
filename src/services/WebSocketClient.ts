@@ -57,10 +57,18 @@ export class WebSocketClient extends EventEmitter {
         this.ws.on('close', (code: number, reason: Buffer) => {
           this.emit('close', code, reason.toString());
           this.ws = null;
+          // Attempt to reconnect on unexpected close
+          this.reconnect().catch(() => {
+            // swallow here; error already logged in reconnect
+          });
         });
 
         this.ws.on('error', (error: Error) => {
           this.emit('error', error);
+          // Try reconnect after error
+          this.reconnect().catch(() => {
+            // swallow here; error already logged in reconnect
+          });
           reject(error);
         });
 

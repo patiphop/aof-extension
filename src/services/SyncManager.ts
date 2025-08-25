@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { FileScanner } from '../utils/FileScanner';
-import { WebSocketClient, SyncMessage } from './WebSocketClient';
+import { WebSocketClient } from './WebSocketClient';
 import { GitignoreParser } from '../utils/GitignoreParser';
 import { logger } from '../utils/Logger';
 
@@ -21,6 +21,9 @@ export class SyncManager extends EventEmitter {
   private localFolderPath: string;
   private isActive = false;
   private readonly MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit for individual files
+  private suppressedPaths: Map<string, number> = new Map();
+  private readonly suppressTtlMs = 2000;
+  private gitignorePatterns: string[] = [];
 
   constructor(localFolderPath: string) {
     super();
@@ -28,6 +31,8 @@ export class SyncManager extends EventEmitter {
     const gitignoreParser = new GitignoreParser();
     this.fileScanner = new FileScanner(gitignoreParser);
     this.webSocketClient = new WebSocketClient('ws://192.168.1.105:1420');
+    // Preload gitignore patterns for client-side filtering (root + subfolders)
+    this.gitignorePatterns = gitignoreParser.loadAllGitignores(this.localFolderPath);
     
     this.setupWebSocketListeners();
   }
@@ -65,7 +70,9 @@ export class SyncManager extends EventEmitter {
 
     try {
       if (this.webSocketClient.isConnected()) {
+        // Ask server to clear its folder and wait for confirmation
         this.webSocketClient.sendClearFolder();
+        await this.waitForFolderClearedConfirmation(2000);
       }
       this.webSocketClient.disconnect();
       this.isActive = false;
@@ -85,6 +92,31 @@ export class SyncManager extends EventEmitter {
     }
 
     try {
+      // Determine relative path once
+      const relativePathForIgnore = this.fileScanner.getRelativePath(this.localFolderPath, filePath);
+
+      // Suppress echo updates coming from server-applied writes
+      if (this.shouldSuppress(relativePathForIgnore)) {
+        return;
+      }
+
+      // Skip node_modules and hidden/temp files
+      if (
+        relativePathForIgnore.startsWith('node_modules/') ||
+        relativePathForIgnore.includes('/node_modules/') ||
+        relativePathForIgnore.startsWith('.') ||
+        relativePathForIgnore.includes('~') ||
+        relativePathForIgnore.includes('#')
+      ) {
+        return;
+      }
+
+      // Apply .gitignore filtering
+      const gitignoreParser = new GitignoreParser();
+      if (gitignoreParser.shouldIgnore(relativePathForIgnore, this.gitignorePatterns)) {
+        return;
+      }
+
       // Check file size before syncing
       const stats = fs.statSync(filePath);
       if (stats.size > this.MAX_FILE_SIZE) {
@@ -92,7 +124,7 @@ export class SyncManager extends EventEmitter {
         return;
       }
 
-      const relativePath = this.fileScanner.getRelativePath(this.localFolderPath, filePath);
+      const relativePath = relativePathForIgnore;
       const content = fs.readFileSync(filePath, 'utf8');
       this.webSocketClient.sendFile(relativePath, content);
     } catch (error) {
@@ -110,6 +142,20 @@ export class SyncManager extends EventEmitter {
 
     try {
       const relativePath = this.fileScanner.getRelativePath(this.localFolderPath, filePath);
+      if (this.shouldSuppress(relativePath)) {
+        return;
+      }
+      if (
+        relativePath.startsWith('node_modules/') ||
+        relativePath.includes('/node_modules/')
+      ) {
+        return;
+      }
+      // Apply .gitignore filtering
+      const gitignoreParser = new GitignoreParser();
+      if (gitignoreParser.shouldIgnore(relativePath, this.gitignorePatterns)) {
+        return;
+      }
       this.webSocketClient.sendDeleteFile(relativePath);
     } catch (error) {
       logger.error(`Error deleting file ${filePath}:`, error);
@@ -249,6 +295,8 @@ export class SyncManager extends EventEmitter {
     const localFilePath = path.join(this.localFolderPath, ...relativePath.split('/'));
 
     try {
+      // Suppress watcher echo for this path while we apply server change
+      this.markSuppress(relativePath);
       // Create directory if it doesn't exist
       const dir = path.dirname(localFilePath);
       if (!fs.existsSync(dir)) {
@@ -278,6 +326,8 @@ export class SyncManager extends EventEmitter {
     const localFilePath = path.join(this.localFolderPath, ...relativePath.split('/'));
 
     try {
+      // Suppress watcher echo for this path while we apply server change
+      this.markSuppress(relativePath);
       // Create directory if it doesn't exist
       const dir = path.dirname(localFilePath);
       if (!fs.existsSync(dir)) {
@@ -313,6 +363,8 @@ export class SyncManager extends EventEmitter {
     const localFilePath = path.join(this.localFolderPath, ...relativePath.split('/'));
 
     try {
+      // Suppress watcher echo for this path while we apply server change
+      this.markSuppress(relativePath);
       if (fs.existsSync(localFilePath)) {
         fs.unlinkSync(localFilePath);
         logger.sync(`File deleted from server: ${relativePath}`);
@@ -329,5 +381,51 @@ export class SyncManager extends EventEmitter {
   private handleFolderCleared(): void {
     logger.sync('Server folder cleared');
     this.emit('folderCleared');
+  }
+
+  /**
+   * Wait until server confirms folder cleared, or timeout
+   */
+  private waitForFolderClearedConfirmation(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const onMessage = (message: ServerMessage) => {
+        if (message.type === 'FOLDER_CLEARED_CONFIRMED') {
+          if (!resolved) {
+            resolved = true;
+            this.webSocketClient.off('message', onMessage as any);
+            resolve();
+          }
+        }
+      };
+
+      // Attach temporary listener
+      this.webSocketClient.on('message', onMessage as any);
+
+      // Fallback timeout
+      setTimeout(() => {
+        if (!resolved) {
+          this.webSocketClient.off('message', onMessage as any);
+          resolve();
+        }
+      }, Math.max(0, timeoutMs));
+    });
+  }
+
+  private markSuppress(relativePath: string): void {
+    const now = Date.now();
+    this.suppressedPaths.set(relativePath, now + this.suppressTtlMs);
+  }
+
+  private shouldSuppress(relativePath: string): boolean {
+    const now = Date.now();
+    const expireAt = this.suppressedPaths.get(relativePath);
+    if (expireAt && expireAt > now) {
+      return true;
+    }
+    if (expireAt && expireAt <= now) {
+      this.suppressedPaths.delete(relativePath);
+    }
+    return false;
   }
 }

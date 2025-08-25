@@ -44,6 +44,14 @@ export class GitignoreParser {
     if (normalizedPath.startsWith('.git/')) {
       return true;
     }
+
+    // Always ignore any node_modules directory (including nested ones)
+    if (
+      normalizedPath.startsWith('node_modules/') ||
+      normalizedPath.includes('/node_modules/')
+    ) {
+      return true;
+    }
     
     // First check for negated patterns
     for (const pattern of patterns) {
@@ -69,6 +77,25 @@ export class GitignoreParser {
           if (minimatch(normalizedPath, pattern, { dot: true })) {
             return true;
           }
+          // Treat non-glob directory paths (with slashes) as directory prefixes
+          const hasSlash = pattern.includes('/');
+          const hasGlob = pattern.includes('*') || pattern.includes('?') || pattern.includes('[') || pattern.includes(']');
+          if (hasSlash && !hasGlob) {
+            if (normalizedPath === pattern || normalizedPath.startsWith(pattern + '/')) {
+              return true;
+            }
+          }
+          // Handle bare directory-name patterns like "dist" meaning any folder named dist at any depth
+          if (!hasSlash && !hasGlob) {
+            if (
+              normalizedPath === pattern ||
+              normalizedPath.startsWith(pattern + '/') ||
+              normalizedPath.endsWith('/' + pattern) ||
+              normalizedPath.includes('/' + pattern + '/')
+            ) {
+              return true;
+            }
+          }
         }
       }
     }
@@ -81,12 +108,30 @@ export class GitignoreParser {
    */
   loadAllGitignores(rootPath: string): string[] {
     const patterns: string[] = [];
-    
+
+    const normalizeSlashes = (p: string) => p.replace(/\\/g, '/');
+
     const loadGitignoresRecursive = (dirPath: string) => {
-      // Load gitignore from current directory
+      // Load gitignore from current directory and prefix patterns with directory scope
       const currentPatterns = this.loadGitignoreFromPath(dirPath);
-      patterns.push(...currentPatterns);
-      
+      if (currentPatterns.length > 0) {
+        const baseRel = normalizeSlashes(path.relative(rootPath, dirPath));
+        for (const raw of currentPatterns) {
+          // Scope patterns to the directory containing the .gitignore
+          const trimmed = raw.replace(/^\//, '');
+          const effective = baseRel && baseRel !== '.' ? `${baseRel}/${trimmed}` : trimmed;
+          const normalized = effective.replace(/\/+/g, '/');
+          if (!patterns.includes(normalized)) {
+            patterns.push(normalized);
+          }
+          // Also include the unscoped raw pattern (normalized) for root-level semantics
+          const rawNormalized = trimmed.replace(/\/+/g, '/');
+          if (!patterns.includes(rawNormalized)) {
+            patterns.push(rawNormalized);
+          }
+        }
+      }
+
       // Recursively check subdirectories
       try {
         const items = fs.readdirSync(dirPath);
@@ -102,7 +147,7 @@ export class GitignoreParser {
         logger.error(`Error reading directory ${dirPath}:`, error);
       }
     };
-    
+
     loadGitignoresRecursive(rootPath);
     return patterns;
   }

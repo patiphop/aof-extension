@@ -160,4 +160,39 @@ describe('GitignoreParser', () => {
       expect(parser.shouldIgnore('important.log', patterns)).toBe(false);
     });
   });
+
+  describe('Monorepo nested ignores', () => {
+    it('should ignore nested node_modules and dist folders at various depths', () => {
+      const parser = new GitignoreParser();
+      const root = '/repo';
+      const patterns = [
+        'node_modules/',
+        'dist/',
+        'packages/widgets/src/dist/',
+        'tools/node_modules/',
+        'dist'
+      ];
+
+      // Simulate loadAllGitignores scoping output by combining raw and scoped patterns
+      const scopedPatterns = [
+        ...patterns,
+        'packages/widgets/src/dist/',
+        'tools/node_modules/'
+      ];
+
+      const should = (p: string) => parser.shouldIgnore(p, scopedPatterns);
+
+      expect(should('node_modules/file.txt')).toBe(true);
+      expect(should('packages/a/node_modules/lib.js')).toBe(true);
+      expect(should('packages/widgets/src/dist/index.js')).toBe(true);
+      expect(should('packages/widgets/dist/index.js')).toBe(true);
+      expect(should('dist/app.js')).toBe(true);
+      expect(should('packages/tools/node_modules/pkg.json')).toBe(true);
+
+      // Non-ignored files
+      expect(should('src/index.ts')).toBe(false);
+      expect(should('packages/widgets/src/index.ts')).toBe(false);
+      expect(should('tools/scripts/build.ts')).toBe(false);
+    });
+  });
 });

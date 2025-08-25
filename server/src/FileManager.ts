@@ -12,6 +12,11 @@ export class FileManager extends EventEmitter {
   private isWatching = false;
   private readonly maxFileSize: number;
   private readonly gitignoreParser: GitignoreParser;
+  private cachedGitignorePatterns: string[] = [];
+  private lastGitignoreLoad = 0;
+  private readonly gitignoreReloadMs = 3000;
+  private suppressedWatcherPaths: Map<string, number> = new Map();
+  private readonly suppressTtlMs = 2000;
 
   constructor(baseDir: string = './synced-files', maxFileSize: number = 50 * 1024 * 1024) {
     super();
@@ -44,8 +49,8 @@ export class FileManager extends EventEmitter {
         
         const relativePath = path.relative(this.baseDir, path.join(this.baseDir, filename));
         
-        // Load gitignore patterns for this directory
-        const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+        // Load gitignore patterns for this directory (cached)
+        const gitignorePatterns = this.getGitignorePatterns();
         
         // Check if file/directory should be ignored based on gitignore
         if (this.gitignoreParser.shouldIgnore(relativePath, gitignorePatterns)) {
@@ -97,8 +102,11 @@ export class FileManager extends EventEmitter {
    */
   private async handleFileCreated(relativePath: string): Promise<void> {
     try {
+      if (this.shouldSuppress(relativePath)) {
+        return;
+      }
       // Load gitignore patterns and check if file should be ignored
-      const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+      const gitignorePatterns = this.getGitignorePatterns();
       if (this.gitignoreParser.shouldIgnore(relativePath, gitignorePatterns)) {
         logger.debug(`Ignoring file creation for ${relativePath} (gitignore pattern)`);
         return;
@@ -133,8 +141,11 @@ export class FileManager extends EventEmitter {
    */
   private async handleFileChanged(relativePath: string): Promise<void> {
     try {
+      if (this.shouldSuppress(relativePath)) {
+        return;
+      }
       // Load gitignore patterns and check if file should be ignored
-      const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+      const gitignorePatterns = this.getGitignorePatterns();
       if (this.gitignoreParser.shouldIgnore(relativePath, gitignorePatterns)) {
         logger.debug(`Ignoring file change for ${relativePath} (gitignore pattern)`);
         return;
@@ -173,8 +184,12 @@ export class FileManager extends EventEmitter {
    * Handle file deletion
    */
   private handleFileDeleted(relativePath: string): void {
+    // Suppress echo if this deletion was initiated programmatically
+    if (this.shouldSuppress(relativePath)) {
+      return;
+    }
     // Load gitignore patterns and check if file should be ignored
-    const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+    const gitignorePatterns = this.getGitignorePatterns();
     if (this.gitignoreParser.shouldIgnore(relativePath, gitignorePatterns)) {
       logger.debug(`Ignoring file deletion for ${relativePath} (gitignore pattern)`);
       return;
@@ -201,7 +216,7 @@ export class FileManager extends EventEmitter {
   async syncFile(relativePath: string, content: string, clientId: string): Promise<void> {
     try {
       // Load gitignore patterns and check if file should be ignored
-      const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+      const gitignorePatterns = this.getGitignorePatterns();
       logger.debug(`Loaded ${gitignorePatterns.length} gitignore patterns for ${relativePath}`);
       logger.debug(`Gitignore patterns:`, gitignorePatterns);
       
@@ -235,7 +250,8 @@ export class FileManager extends EventEmitter {
         }
       }
 
-      // Write file
+      // Write file (suppress watcher echo for this path)
+      this.markSuppress(relativePath);
       await fs.writeFile(filePath, content, 'utf8');
 
       // Update file info
@@ -256,13 +272,30 @@ export class FileManager extends EventEmitter {
     }
   }
 
+  private markSuppress(relativePath: string): void {
+    const now = Date.now();
+    this.suppressedWatcherPaths.set(relativePath, now + this.suppressTtlMs);
+  }
+
+  private shouldSuppress(relativePath: string): boolean {
+    const now = Date.now();
+    const expireAt = this.suppressedWatcherPaths.get(relativePath);
+    if (expireAt && expireAt > now) {
+      return true;
+    }
+    if (expireAt && expireAt <= now) {
+      this.suppressedWatcherPaths.delete(relativePath);
+    }
+    return false;
+  }
+
   /**
    * Delete a file
    */
   async deleteFile(relativePath: string): Promise<void> {
     try {
       // Load gitignore patterns and check if file should be ignored
-      const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+      const gitignorePatterns = this.getGitignorePatterns();
       if (this.gitignoreParser.shouldIgnore(relativePath, gitignorePatterns)) {
         logger.debug(`Ignoring file deletion for ${relativePath} (gitignore pattern)`);
         return;
@@ -271,6 +304,8 @@ export class FileManager extends EventEmitter {
       const filePath = path.join(this.baseDir, relativePath);
       
       if (fs.existsSync(filePath)) {
+        // Mark suppression to prevent watcher emitting a duplicate event
+        this.markSuppress(relativePath);
         await fs.remove(filePath);
         this.files.delete(relativePath);
         logger.sync(`File deleted: ${relativePath}`);
@@ -374,6 +409,11 @@ export class FileManager extends EventEmitter {
    * Get all gitignore patterns for the current directory
    */
   getGitignorePatterns(): string[] {
-    return this.gitignoreParser.loadAllGitignores(this.baseDir);
+    const now = Date.now();
+    if (now - this.lastGitignoreLoad > this.gitignoreReloadMs || this.cachedGitignorePatterns.length === 0) {
+      this.cachedGitignorePatterns = this.gitignoreParser.loadAllGitignores(this.baseDir);
+      this.lastGitignoreLoad = now;
+    }
+    return this.cachedGitignorePatterns;
   }
 }

@@ -2,9 +2,9 @@ import { SyncServer } from './SyncServer';
 import { logger, LogLevel } from './utils/Logger';
 import { loadConfig } from './config';
 
-// Set up logger for server mode
+// Set up logger for server mode (reduce verbosity to WARN by default)
 logger.setExtensionMode(false);
-logger.setLogLevel(LogLevel.DEBUG); // Set to DEBUG to see gitignore patterns
+logger.setLogLevel(LogLevel.WARN);
 
 // Load server configuration
 const config = loadConfig();
@@ -45,13 +45,14 @@ logger.server(`- BaseDir: ${config.baseDir}`);
 logger.server(`- Max Payload: ${config.maxPayloadSize / (1024 * 1024)}MB`);
 logger.server(`- Max File Size: ${config.maxFileSize / (1024 * 1024)}MB`);
 
-// Show gitignore patterns
-const gitignorePatterns = server.getGitignorePatterns();
-if (gitignorePatterns.length > 0) {
-  logger.server(`- Gitignore Patterns: ${gitignorePatterns.length} patterns loaded`);
-  logger.debug('Gitignore patterns:', gitignorePatterns);
-} else {
-  logger.server('- Gitignore Patterns: No .gitignore files found');
-}
+// Optionally show gitignore pattern summary at WARN/INFO threshold only
+try {
+  const gitignorePatterns = server.getGitignorePatterns();
+  if (gitignorePatterns.length > 0) {
+    logger.server(`- Gitignore Patterns: ${gitignorePatterns.length} patterns loaded`);
+  } else {
+    logger.server('- Gitignore Patterns: No .gitignore files found');
+  }
+} catch {}
 
 logger.server(`- Press Ctrl+C to stop the server`);

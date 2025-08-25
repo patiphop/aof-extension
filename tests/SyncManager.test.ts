@@ -4,13 +4,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Mock WebSocketClient
+const sendFileMock = vi.fn();
+const sendDeleteFileMock = vi.fn();
 vi.mock('../src/services/WebSocketClient', () => ({
   WebSocketClient: vi.fn().mockImplementation(() => ({
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
     isConnected: vi.fn().mockReturnValue(true),
-    sendFile: vi.fn(),
-    sendDeleteFile: vi.fn(),
+    sendFile: sendFileMock,
+    sendDeleteFile: sendDeleteFileMock,
     sendClearFolder: vi.fn(),
     on: vi.fn(),
     emit: vi.fn()
@@ -27,12 +29,7 @@ vi.mock('../src/utils/FileScanner', () => ({
   }))
 }));
 
-// Mock GitignoreParser
-vi.mock('../src/utils/GitignoreParser', () => ({
-  GitignoreParser: vi.fn().mockImplementation(() => ({
-    isIgnored: vi.fn().mockReturnValue(false)
-  }))
-}));
+// Use real GitignoreParser for accurate behavior
 
 describe('SyncManager - Bidirectional Sync', () => {
   let syncManager: SyncManager;
@@ -43,6 +40,8 @@ describe('SyncManager - Bidirectional Sync', () => {
     await fs.promises.mkdir(testDir, { recursive: true });
     
     syncManager = new SyncManager(testDir);
+    sendFileMock.mockReset();
+    sendDeleteFileMock.mockReset();
   });
 
   afterEach(async () => {
@@ -225,6 +224,59 @@ describe('SyncManager - Bidirectional Sync', () => {
       
       const content = fs.readFileSync(testFile, 'utf8');
       expect(content).toBe('nested content');
+    });
+  });
+
+  describe('Suppression & .gitignore handling', () => {
+    it('should not resend when applying server change (suppression)', async () => {
+      // Simulate server message that writes a file locally
+      syncManager.handleServerMessage({
+        type: 'FILE_CHANGED',
+        payload: { relativePath: 'loop.txt', fileContent: 'from server', version: 1 }
+      });
+
+      // Immediately attempt to sync same path as if file watcher fired
+      const localFile = path.join(testDir, 'loop.txt');
+      syncManager.syncFile(localFile);
+
+      // Expect no client send due to suppression window
+      expect(sendFileMock).not.toHaveBeenCalled();
+    });
+
+    it('should honor .gitignore in root and subfolders', async () => {
+      // Create .gitignore in root and subfolder
+      fs.writeFileSync(path.join(testDir, '.gitignore'), 'dist\n*.log\n');
+      const subDir = path.join(testDir, 'packages', 'a');
+      await fs.promises.mkdir(subDir, { recursive: true });
+      fs.writeFileSync(path.join(subDir, '.gitignore'), '/generated\n');
+
+      // Recreate manager to reload gitignore patterns
+      syncManager = new SyncManager(testDir);
+
+      // Paths to test
+      const ignoredRootFile = path.join(testDir, 'app.log');
+      const ignoredRootDirFile = path.join(testDir, 'dist', 'bundle.js');
+      const ignoredScopedDirFile = path.join(testDir, 'packages', 'a', 'generated', 'index.ts');
+      const allowedFile = path.join(testDir, 'src', 'index.ts');
+      await fs.promises.mkdir(path.dirname(ignoredRootDirFile), { recursive: true });
+      await fs.promises.mkdir(path.dirname(ignoredScopedDirFile), { recursive: true });
+      await fs.promises.mkdir(path.dirname(allowedFile), { recursive: true });
+      fs.writeFileSync(ignoredRootFile, 'x');
+      fs.writeFileSync(ignoredRootDirFile, 'x');
+      fs.writeFileSync(ignoredScopedDirFile, 'x');
+      fs.writeFileSync(allowedFile, 'x');
+
+      // Attempt syncs
+      // Mark sync active so syncFile will proceed
+      ;(syncManager as any).isActive = true;
+      syncManager.syncFile(ignoredRootFile);
+      syncManager.syncFile(ignoredRootDirFile);
+      syncManager.syncFile(ignoredScopedDirFile);
+      syncManager.syncFile(allowedFile);
+
+      // Only allowed file should be sent
+      expect(sendFileMock).toHaveBeenCalledTimes(1);
+      expect(sendFileMock.mock.calls[0][0]).toBe('src/index.ts');
     });
   });
 

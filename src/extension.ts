@@ -157,22 +157,36 @@ function setupFileWatchers(localFolderPath: string): void {
 
   // Watch for file saves
   const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*');
+  const debounceMap = new Map<string, ReturnType<typeof setTimeout>>();
+  const DEBOUNCE_MS = 60;
+
+  const runDebounced = (key: string, fn: () => void) => {
+    const existing = debounceMap.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const handle = setTimeout(() => {
+      debounceMap.delete(key);
+      fn();
+    }, DEBOUNCE_MS);
+    debounceMap.set(key, handle);
+  };
   
   fileWatcher.onDidChange(async (uri) => {
     if (uri.fsPath.startsWith(localFolderPath)) {
-      syncManager!.syncFile(uri.fsPath);
+      runDebounced(uri.fsPath, () => syncManager!.syncFile(uri.fsPath));
     }
   });
 
   fileWatcher.onDidCreate(async (uri) => {
     if (uri.fsPath.startsWith(localFolderPath)) {
-      syncManager!.syncFile(uri.fsPath);
+      runDebounced(uri.fsPath, () => syncManager!.syncFile(uri.fsPath));
     }
   });
 
   fileWatcher.onDidDelete(async (uri) => {
     if (uri.fsPath.startsWith(localFolderPath)) {
-      syncManager!.deleteFile(uri.fsPath);
+      runDebounced(uri.fsPath, () => syncManager!.deleteFile(uri.fsPath));
     }
   });
 }
