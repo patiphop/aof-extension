@@ -1,0 +1,394 @@
+---
+description:
+globs: "**"
+alwaysApply: true
+---
+
+
+# faizSync Server Architecture
+
+## Server Structure
+
+### Main Entry Point
+- **File**: `server/src/server.ts`
+- **Purpose**: Server startup and graceful shutdown
+- **Port**: 1420 (configurable via PORT env var)
+
+### Core Components
+- **SyncServer**: WebSocket server with client management
+- **FileManager**: File system operations and change detection
+- **Logger**: Server-side logging system
+
+### Configuration
+- **Base Directory**: `/Users/patiphopungudchuak/Documents/workspaces/sync-local-files`
+- **WebSocket Port**: 1420
+- **File Watching**: Recursive directory monitoring
+
+## Server Lifecycle
+
+### Startup
+```typescript
+// Create and start the sync server
+const server = new SyncServer(port);
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  logger.server('Received SIGINT, shutting down gracefully...');
+  server.stop();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  logger.server('Received SIGTERM, shutting down gracefully...');
+  server.stop();
+  process.exit(0);
+});
+```
+
+### Shutdown
+```typescript
+stop(): void {
+  if (this.pingInterval) {
+    clearInterval(this.pingInterval);
+  }
+  
+  // Stop file watcher
+  this.fileManager.stopWatching();
+  
+  this.wss.close(() => {
+    logger.server('faizSync Server stopped');
+  });
+}
+```
+
+## WebSocket Server
+
+### Connection Management
+```typescript
+private setupWebSocketServer(): void {
+  this.wss.on('connection', (ws: WebSocket) => {
+    this.handleNewConnection(ws);
+  });
+
+  this.wss.on('error', (error: Error) => {
+    logger.error('WebSocket server error:', error);
+  });
+}
+```
+
+### Client Connection Handling
+```typescript
+private handleNewConnection(ws: WebSocket): void {
+  const clientId = uuidv4();
+  const clientInfo: ClientInfo = {
+    id: clientId,
+    ws,
+    isAlive: true,
+    lastPing: Date.now()
+  };
+
+  this.clients.set(clientId, clientInfo);
+  logger.connection(`Client connected: ${clientId} (Total: ${this.clients.size})`);
+
+  // Send welcome message
+  this.sendToClient(clientId, {
+    type: 'CONNECTED',
+    payload: { clientId, fileCount: this.fileManager.getFileCount() }
+  });
+
+  // Set up message handler
+  ws.on('message', (data: any) => {
+    this.handleMessage(clientId, data);
+  });
+
+  // Set up close handler
+  ws.on('close', () => {
+    this.handleClientDisconnect(clientId);
+  });
+
+  // Set up error handler
+  ws.on('error', (error: Error) => {
+    logger.error(`Client ${clientId} error:`, error);
+    this.handleClientDisconnect(clientId);
+  });
+
+  // Set up pong handler
+  ws.on('pong', () => {
+    const client = this.clients.get(clientId);
+    if (client) {
+      client.isAlive = true;
+      client.lastPing = Date.now();
+    }
+  });
+}
+```
+
+## Message Handling
+
+### Client Message Types
+```typescript
+interface SyncMessage {
+  type: 'SYNC_FILE' | 'DELETE_FILE' | 'CLEAR_FOLDER' | 'PING';
+  payload?: {
+    relativePath?: string;
+    fileContent?: string;
+  };
+}
+```
+
+### Message Routing
+```typescript
+private handleMessage(clientId: string, data: any): void {
+  try {
+    const message: SyncMessage = JSON.parse(data.toString());
+    logger.debug(`Message from client ${clientId}:`, message.type);
+
+    switch (message.type) {
+      case 'SYNC_FILE':
+        this.handleFileSync(clientId, message as FileSyncMessage);
+        break;
+      case 'DELETE_FILE':
+        this.handleFileDelete(clientId, message as DeleteFileMessage);
+        break;
+      case 'CLEAR_FOLDER':
+        this.handleClearFolder(clientId, message as ClearFolderMessage);
+        break;
+      case 'PING':
+        this.handlePing(clientId);
+        break;
+      default:
+        logger.warn(`Unknown message type from client ${clientId}:`, message.type);
+    }
+  } catch (error) {
+    logger.error(`Error parsing message from client ${clientId}:`, error);
+  }
+}
+```
+
+### File Sync Handling
+```typescript
+private async handleFileSync(clientId: string, message: FileSyncMessage): Promise<void> {
+  try {
+    const { relativePath, fileContent } = message.payload;
+    
+    // Sync file to local storage
+    await this.fileManager.syncFile(relativePath, fileContent, clientId);
+
+    // Broadcast to other clients
+    this.broadcastToOthers(clientId, {
+      type: 'FILE_UPDATED',
+      payload: { relativePath, fileContent }
+    });
+
+    // Send confirmation to sender
+    this.sendToClient(clientId, {
+      type: 'FILE_SYNCED',
+      payload: { relativePath }
+    });
+
+  } catch (error) {
+    logger.error(`Error handling file sync from client ${clientId}:`, error);
+    this.sendToClient(clientId, {
+      type: 'ERROR',
+      payload: { message: 'Failed to sync file' }
+    });
+  }
+}
+```
+
+## File Management
+
+### File Operations
+```typescript
+class FileManager extends EventEmitter {
+  // File operations
+  async syncFile(relativePath: string, content: string, clientId: string): Promise<void>
+  async deleteFile(relativePath: string): Promise<void>
+  async clearFolder(): Promise<void>
+  
+  // File watching
+  startWatching(): void
+  stopWatching(): void
+  
+  // File queries
+  getFileContent(relativePath: string): string | null
+  getAllFiles(): FileInfo[]
+  fileExists(relativePath: string): boolean
+  getFileInfo(relativePath: string): FileInfo | null
+}
+```
+
+### File Watching
+```typescript
+startWatching(): void {
+  if (this.isWatching) {
+    return;
+  }
+
+  try {
+    this.fileWatcher = fs.watch(this.baseDir, { recursive: true }, (eventType, filename) => {
+      if (!filename) return;
+      
+      const relativePath = path.relative(this.baseDir, path.join(this.baseDir, filename));
+      
+      // Ignore temporary files and hidden files
+      if (relativePath.startsWith('.') || relativePath.includes('~') || relativePath.includes('#')) {
+        return;
+      }
+
+      logger.debug(`File watcher detected ${eventType} for ${relativePath}`);
+      
+      if (eventType === 'rename') {
+        // Check if file was deleted or created
+        const fullPath = path.join(this.baseDir, relativePath);
+        if (fs.existsSync(fullPath)) {
+          this.handleFileCreated(relativePath);
+        } else {
+          this.handleFileDeleted(relativePath);
+        }
+      } else if (eventType === 'change') {
+        this.handleFileChanged(relativePath);
+      }
+    });
+
+    this.isWatching = true;
+    logger.sync('File watcher started');
+  } catch (error) {
+    logger.error('Error starting file watcher:', error);
+  }
+}
+```
+
+### File Change Events
+```typescript
+// File creation
+this.emit('fileCreated', { relativePath, content, version: fileInfo.version });
+
+// File change
+this.emit('fileChanged', { relativePath, content, version: fileInfo.version });
+
+// File deletion
+this.emit('fileDeleted', { relativePath });
+```
+
+## Client Management
+
+### Client Information
+```typescript
+interface ClientInfo {
+  id: string;
+  ws: any;
+  isAlive: boolean;
+  lastPing: number;
+  folderPath?: string;
+}
+```
+
+### Health Monitoring
+```typescript
+private startPingInterval(): void {
+  this.pingInterval = setInterval(() => {
+    this.clients.forEach((client, clientId) => {
+      if (!client.isAlive) {
+        logger.connection(`Terminating inactive client: ${clientId}`);
+        client.ws.terminate();
+        this.clients.delete(clientId);
+        return;
+      }
+
+      client.isAlive = false;
+      try {
+        client.ws.ping();
+      } catch (error) {
+        logger.error(`Error pinging client ${clientId}:`, error);
+      }
+    });
+  }, 30000); // 30 seconds
+}
+```
+
+## Broadcasting
+
+### Message Broadcasting
+```typescript
+// Broadcast to all clients except sender
+private broadcastToOthers(senderId: string, message: any): void {
+  this.clients.forEach((client, clientId) => {
+    if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+      try {
+        client.ws.send(JSON.stringify(message));
+      } catch (error) {
+        logger.error(`Error broadcasting to client ${clientId}:`, error);
+      }
+    }
+  });
+}
+
+// Broadcast to all clients
+private broadcastToAll(message: any): void {
+  this.clients.forEach((client, clientId) => {
+    if (client.ws.readyState === WebSocket.OPEN) {
+      try {
+        client.ws.send(JSON.stringify(message));
+      } catch (error) {
+        logger.error(`Error broadcasting to client ${clientId}:`, error);
+      }
+    }
+  });
+}
+```
+
+## Error Handling
+
+### Connection Errors
+- WebSocket connection failures
+- Client disconnections
+- Network timeouts
+
+### File Operation Errors
+- Permission denied
+- Disk space issues
+- File system errors
+
+### Message Errors
+- Invalid JSON
+- Unknown message types
+- Missing payload data
+
+## Performance Considerations
+
+### File Watching
+- Recursive directory monitoring
+- Filter out temporary files
+- Handle large numbers of files
+
+### Memory Management
+- Client connection pooling
+- File metadata caching
+- Event listener cleanup
+
+### Network Optimization
+- Message batching
+- Connection pooling
+- Heartbeat monitoring
+
+## Security Considerations
+
+### File Access
+- Local file system access
+- No authentication required
+- File permission handling
+
+### Network Access
+- WebSocket connections
+- No encryption by default
+- Port-based access control
+
+### File Content
+- Text file synchronization
+- Binary file exclusion
+- File size limitations
+description:
+globs:
+alwaysApply: false
+---

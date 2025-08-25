@@ -1,3 +1,11 @@
+---
+description:
+globs: "**"
+alwaysApply: true
+---
+
+
+# faizSync Extension - Complete System Rules
 
 ## Overview
 - **Stack**: VS Code Extension (TypeScript, Webpack), Node server (TypeScript), WebSocket via `ws`, Vitest, ESLint.
@@ -6,9 +14,142 @@
 - **Key utils**: `src/utils/FileScanner.ts`, `src/utils/GitignoreParser.ts`, `src/utils/Logger.ts`.
 - **Features**: Real-time file sync, bidirectional sync, git folder sync (optional), .gitignore support, binary file filtering.
 
+## System Architecture
+
+### Extension Architecture
+```
+src/
+├── extension.ts              # Main VSCode extension entry point
+├── services/
+│   ├── SyncManager.ts        # Coordinates file scanning and WebSocket communication
+│   └── WebSocketClient.ts    # Handles WebSocket connection and messaging
+├── utils/
+│   ├── FileScanner.ts        # Scans files and filters binary content
+│   ├── GitignoreParser.ts    # Parses .gitignore files and patterns
+│   └── Logger.ts             # Configurable logging system
+├── config/
+│   └── logging.ts            # Logging configuration presets
+└── webview/
+    └── WebViewProvider.ts    # Provides the WebView dashboard interface
+```
+
+### Server Architecture
+```
+server/
+├── src/
+│   ├── server.ts             # Server entry point with graceful shutdown
+│   ├── SyncServer.ts         # WebSocket server with client management
+│   ├── FileManager.ts        # File system operations and watching
+│   ├── types.ts              # TypeScript interfaces and types
+│   └── utils/
+│       └── Logger.ts         # Server-side logging
+└── tests/                    # Server unit tests
+```
+
+### Bidirectional Sync Flow
+```
+Client A                    Server                    Client B
+   │                         │                         │
+   │ 1. Edit file           │                         │
+   │ 2. Save file           │                         │
+   │ 3. Send SYNC_FILE      │                         │
+   │─────────────────────────▶                         │
+   │                         │ 4. Save file           │
+   │                         │ 5. Broadcast           │
+   │                         │    FILE_UPDATED        │
+   │                         │─────────────────────────▶
+   │                         │                         │ 6. Update local file
+   │                         │                         │ 7. Show notification
+```
+
 ## Commands & Scripts
 - Root: `bundle`, `watch`, `compile`, `lint`, `test`, `test:watch`, `test:coverage`, `build`.
 - Server: `build`, `dev`, `test`, `test:coverage`.
+
+## Core Components
+
+### FileScanner
+- **Purpose**: Recursively scans directories and filters files
+- **Features**: Binary file detection, text file filtering, gitignore support
+- **Methods**: `scanFiles()`, `isTextFile()`, `getRelativePath()`
+- **File Types**: Supports 50+ text file extensions, excludes binary files
+
+### GitignoreParser
+- **Purpose**: Parses and applies .gitignore patterns
+- **Features**: Recursive loading, negation support, directory patterns
+- **Methods**: `parseGitignore()`, `shouldIgnore()`, `loadAllGitignores()`
+- **Patterns**: Supports `!important.log`, `node_modules/`, etc.
+
+### SyncManager
+- **Purpose**: Coordinates file synchronization between client and server
+- **Features**: Initial sync, real-time updates, conflict detection
+- **Events**: `syncStarted`, `syncStopped`, `connected`, `disconnected`, `fileUpdated`
+- **Methods**: `startSync()`, `stopSync()`, `syncFile()`, `deleteFile()`
+
+### WebSocketClient
+- **Purpose**: Manages WebSocket connection to sync server
+- **Features**: Auto-reconnection, exponential backoff, message queuing
+- **Methods**: `connect()`, `disconnect()`, `sendFile()`, `sendDeleteFile()`
+- **URL**: Hardcoded to `ws://192.168.1.105:1420`
+
+### Logger
+- **Purpose**: Configurable logging system with categories
+- **Levels**: ERROR(0), WARN(1), INFO(2), DEBUG(3)
+- **Categories**: extension, server, sync, connection, debug
+- **Configs**: default, quiet, verbose
+
+## Server Components
+
+### SyncServer
+- **Purpose**: WebSocket server managing client connections
+- **Features**: Client management, message routing, health monitoring
+- **Port**: 1420 (configurable via PORT env var)
+- **Base Directory**: `/Users/patiphopungudchuak/Documents/workspaces/sync-local-files`
+
+### FileManager
+- **Purpose**: File system operations and change detection
+- **Features**: File watching, version control, conflict detection
+- **Methods**: `syncFile()`, `deleteFile()`, `clearFolder()`, `startWatching()`
+- **Events**: `fileCreated`, `fileChanged`, `fileDeleted`
+
+## Message Protocol
+
+### Client → Server Messages
+```typescript
+interface SyncMessage {
+  type: 'SYNC_FILE' | 'DELETE_FILE' | 'CLEAR_FOLDER' | 'PING';
+  payload?: {
+    relativePath?: string;
+    fileContent?: string;
+  };
+}
+```
+
+### Server → Client Messages
+```typescript
+interface ServerMessage {
+  type: 'FILE_UPDATED' | 'FILE_CREATED' | 'FILE_CHANGED' | 'FILE_DELETED' | 'FOLDER_CLEARED';
+  payload?: {
+    relativePath?: string;
+    fileContent?: string;
+    version?: number;
+  };
+}
+```
+
+## File Filtering
+
+### Text Files (Included)
+- Source code: `.js`, `.ts`, `.py`, `.java`, `.cpp`, etc.
+- Configuration: `.json`, `.yaml`, `.toml`, `.env`, etc.
+- Documentation: `.md`, `.txt`, `.rst`, etc.
+- Build files: `Dockerfile`, `Makefile`, `package.json`, etc.
+
+### Binary Files (Excluded)
+- Images: `.png`, `.jpg`, `.gif`, `.svg`, etc.
+- Executables: `.exe`, `.dll`, `.so`, `.dylib`, etc.
+- Archives: `.zip`, `.tar`, `.rar`, etc.
+- Databases: `.db`, `.sqlite`, etc.
 
 ## Architectural Rules
 - Extension lifecycle via `activate`/`deactivate`. Register commands in `activate` and push disposables to `context.subscriptions`.
@@ -51,6 +192,23 @@
 - Use `vscode.window.show*Message` sparingly (start/stop, connected/disconnected, conflicts). Use progress where operations are long.
 - **Git folder sync**: Automatically enabled by default; no user selection required for git functionality.
 
+## Logging Configuration
+- **Quiet Mode** (Default): Shows only warnings, errors, and connection events
+- **Verbose Mode**: Shows all logs including file sync operations
+- **Custom Configuration**: Adjust log levels and categories as needed
+
+## Conflict Resolution
+- **Version Control**: Each file has version number to prevent data loss
+- **Conflict Detection**: System warns when local and server versions differ
+- **Current Behavior**: Server version wins (configurable for future)
+- **No Data Loss**: All changes preserved in versioning system
+
+## Deployment
+- **Server**: Node.js 18+, WebSocket port 1420, hardcoded sync directory
+- **Extension**: VSCode 1.74+, packaged as .vsix file
+- **Network**: WebSocket communication, no authentication required
+- **File Storage**: Local directory on server machine
+
 ## Editing Workflow (for AI)
 - Always follow these rules.
 - Before edits: scan impacted files; keep edits minimal and localized.
@@ -66,10 +224,5 @@
 
 ## References
 - `src/extension.ts`, `src/services/SyncManager.ts`, `src/services/WebSocketClient.ts`, `src/utils/FileScanner.ts`, `src/utils/GitignoreParser.ts`, `src/utils/Logger.ts`, `server/`.
-- **Git sync docs**: `GIT_SYNC_EXAMPLE.md`, `GIT_SYNC_CHANGES.md`.
-- New config (e.g., WS URL): add setting/env with default, thread via `SyncManager` ctor, add tests.
-- New server message: extend types and switch in `handleServerMessage`, implement handler like `handleFile*`, emit events, add tests.
-- Scanning perf: profile `scanFiles`, reduce sync IO in hot paths, keep `.gitignore` behavior; add tests.
-
-## References
-- `src/extension.ts`, `src/services/SyncManager.ts`, `src/services/WebSocketClient.ts`, `src/utils/FileScanner.ts`, `src/utils/GitignoreParser.ts`, `src/utils/Logger.ts`, `server/`.
+- **Documentation**: `README.md`, `LOGGING.md`, `SERVER_CONFIG.md`, `DEPLOYMENT.md`, `BIDIRECTIONAL_SYNC_EXAMPLE.md`
+- **Git sync docs**: `GIT_SYNC_EXAMPLE.md`, `GIT_SYNC_CHANGES.md` (if exist).

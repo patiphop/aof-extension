@@ -20,6 +20,8 @@ export class SyncManager extends EventEmitter {
   private webSocketClient: WebSocketClient;
   private localFolderPath: string;
   private isActive = false;
+  private readonly MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit for individual files
+
   constructor(localFolderPath: string) {
     super();
     this.localFolderPath = localFolderPath;
@@ -83,6 +85,13 @@ export class SyncManager extends EventEmitter {
     }
 
     try {
+      // Check file size before syncing
+      const stats = fs.statSync(filePath);
+      if (stats.size > this.MAX_FILE_SIZE) {
+        logger.warn(`File too large to sync: ${filePath} (${stats.size} bytes, max: ${this.MAX_FILE_SIZE} bytes)`);
+        return;
+      }
+
       const relativePath = this.fileScanner.getRelativePath(this.localFolderPath, filePath);
       const content = fs.readFileSync(filePath, 'utf8');
       this.webSocketClient.sendFile(relativePath, content);
@@ -174,18 +183,29 @@ export class SyncManager extends EventEmitter {
    */
   private async performInitialSync(): Promise<void> {
     const files = this.fileScanner.scanFiles(this.localFolderPath);
+    let syncedCount = 0;
+    let skippedCount = 0;
     
     for (const filePath of files) {
       try {
+        // Check file size before syncing
+        const stats = fs.statSync(filePath);
+        if (stats.size > this.MAX_FILE_SIZE) {
+          logger.warn(`Skipping oversized file in initial sync: ${filePath} (${stats.size} bytes, max: ${this.MAX_FILE_SIZE} bytes)`);
+          skippedCount++;
+          continue;
+        }
+
         const relativePath = this.fileScanner.getRelativePath(this.localFolderPath, filePath);
         const content = fs.readFileSync(filePath, 'utf8');
         this.webSocketClient.sendFile(relativePath, content);
+        syncedCount++;
       } catch (error) {
         logger.error(`Error in initial sync for ${filePath}:`, error);
       }
     }
 
-    logger.sync(`Initial sync complete. Synced ${files.length} files.`);
+    logger.sync(`Initial sync complete. Synced ${syncedCount} files, skipped ${skippedCount} oversized files.`);
   }
 
   /**
@@ -193,23 +213,24 @@ export class SyncManager extends EventEmitter {
    */
   private setupWebSocketListeners(): void {
     this.webSocketClient.on('open', () => {
-      logger.connection('Connected to sync server');
       this.emit('connected');
     });
 
-    this.webSocketClient.on('message', (message: SyncMessage) => {
-      this.handleServerMessage(message);
-    });
-
     this.webSocketClient.on('close', (code: number, reason: string) => {
-      logger.connection(`Disconnected from sync server: ${code} - ${reason}`);
-      this.isActive = false;
       this.emit('disconnected', code, reason);
     });
 
     this.webSocketClient.on('error', (error: Error) => {
-      logger.error('WebSocket error:', error);
       this.emit('error', error);
+    });
+
+    this.webSocketClient.on('serverError', (errorMessage: string) => {
+      logger.error('Server error:', errorMessage);
+      this.emit('serverError', errorMessage);
+    });
+
+    this.webSocketClient.on('message', (message: ServerMessage) => {
+      this.handleServerMessage(message);
     });
   }
 

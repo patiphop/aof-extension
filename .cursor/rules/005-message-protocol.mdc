@@ -1,0 +1,569 @@
+---
+description:
+globs: "**"
+alwaysApply: true
+---
+
+# faizSync Message Protocol
+
+## Overview
+faizSync ใช้ WebSocket protocol สำหรับการสื่อสารระหว่าง client และ server โดยใช้ JSON messages ที่มีโครงสร้างมาตรฐาน
+
+## Message Structure
+
+### Base Message Interface
+```typescript
+interface SyncMessage {
+  type: string;
+  payload?: any;
+}
+```
+
+### Client → Server Messages
+
+#### SYNC_FILE
+ส่งเมื่อ client ต้องการ sync ไฟล์ไปยัง server
+```typescript
+interface FileSyncMessage extends SyncMessage {
+  type: 'SYNC_FILE';
+  payload: {
+    relativePath: string;    // Path ของไฟล์เทียบกับ root directory
+    fileContent: string;     // เนื้อหาของไฟล์
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "SYNC_FILE",
+  "payload": {
+    "relativePath": "src/main.ts",
+    "fileContent": "console.log('Hello World');"
+  }
+}
+```
+
+#### DELETE_FILE
+ส่งเมื่อ client ต้องการลบไฟล์จาก server
+```typescript
+interface DeleteFileMessage extends SyncMessage {
+  type: 'DELETE_FILE';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่ต้องการลบ
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "DELETE_FILE",
+  "payload": {
+    "relativePath": "src/old-file.ts"
+  }
+}
+```
+
+#### CLEAR_FOLDER
+ส่งเมื่อ client ต้องการล้างโฟลเดอร์ทั้งหมดบน server
+```typescript
+interface ClearFolderMessage extends SyncMessage {
+  type: 'CLEAR_FOLDER';
+}
+```
+
+**Example:**
+```json
+{
+  "type": "CLEAR_FOLDER"
+}
+```
+
+#### PING
+ส่งเพื่อตรวจสอบการเชื่อมต่อและ keep-alive
+```typescript
+interface PingMessage extends SyncMessage {
+  type: 'PING';
+}
+```
+
+**Example:**
+```json
+{
+  "type": "PING"
+}
+```
+
+### Server → Client Messages
+
+#### CONNECTED
+ส่งเมื่อ client เชื่อมต่อสำเร็จ
+```typescript
+interface ConnectedMessage extends SyncMessage {
+  type: 'CONNECTED';
+  payload: {
+    clientId: string;        // Unique ID สำหรับ client
+    fileCount: number;       // จำนวนไฟล์ที่มีอยู่บน server
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "CONNECTED",
+  "payload": {
+    "clientId": "abc123-def456",
+    "fileCount": 15
+  }
+}
+```
+
+#### FILE_UPDATED
+ส่งเมื่อไฟล์ถูกอัปเดทโดย client อื่น (legacy message)
+```typescript
+interface FileUpdateMessage extends SyncMessage {
+  type: 'FILE_UPDATED';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่อัปเดท
+    fileContent: string;     // เนื้อหาใหม่ของไฟล์
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FILE_UPDATED",
+  "payload": {
+    "relativePath": "src/main.ts",
+    "fileContent": "console.log('Updated Hello World');"
+  }
+}
+```
+
+#### FILE_CREATED
+ส่งเมื่อไฟล์ถูกสร้างใหม่บน server
+```typescript
+interface FileCreatedMessage extends SyncMessage {
+  type: 'FILE_CREATED';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่สร้างใหม่
+    fileContent: string;     // เนื้อหาของไฟล์
+    version: number;         // Version number ของไฟล์
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FILE_CREATED",
+  "payload": {
+    "relativePath": "src/new-file.ts",
+    "fileContent": "export function newFunction() {}",
+    "version": 1
+  }
+}
+```
+
+#### FILE_CHANGED
+ส่งเมื่อไฟล์ถูกเปลี่ยนแปลงบน server
+```typescript
+interface FileChangedMessage extends SyncMessage {
+  type: 'FILE_CHANGED';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่เปลี่ยนแปลง
+    fileContent: string;     // เนื้อหาใหม่ของไฟล์
+    version: number;         // Version number ของไฟล์
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FILE_CHANGED",
+  "payload": {
+    "relativePath": "src/main.ts",
+    "fileContent": "console.log('Changed Hello World');",
+    "version": 3
+  }
+}
+```
+
+#### FILE_DELETED
+ส่งเมื่อไฟล์ถูกลบจาก server
+```typescript
+interface FileDeleteMessage extends SyncMessage {
+  type: 'FILE_DELETED';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่ถูกลบ
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FILE_DELETED",
+  "payload": {
+    "relativePath": "src/old-file.ts"
+  }
+}
+```
+
+#### FOLDER_CLEARED
+ส่งเมื่อโฟลเดอร์ทั้งหมดถูกล้างบน server
+```typescript
+interface FolderClearedMessage extends SyncMessage {
+  type: 'FOLDER_CLEARED';
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FOLDER_CLEARED"
+}
+```
+
+#### FILE_SYNCED
+ส่งเพื่อยืนยันว่าไฟล์ถูก sync สำเร็จ
+```typescript
+interface FileSyncedMessage extends SyncMessage {
+  type: 'FILE_SYNCED';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่ sync สำเร็จ
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FILE_SYNCED",
+  "payload": {
+    "relativePath": "src/main.ts"
+  }
+}
+```
+
+#### FILE_DELETED_CONFIRMED
+ส่งเพื่อยืนยันว่าไฟล์ถูกลบสำเร็จ
+```typescript
+interface FileDeletedConfirmedMessage extends SyncMessage {
+  type: 'FILE_DELETED_CONFIRMED';
+  payload: {
+    relativePath: string;    // Path ของไฟล์ที่ถูกลบสำเร็จ
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FILE_DELETED_CONFIRMED",
+  "payload": {
+    "relativePath": "src/old-file.ts"
+  }
+}
+```
+
+#### FOLDER_CLEARED_CONFIRMED
+ส่งเพื่อยืนยันว่าโฟลเดอร์ถูกล้างสำเร็จ
+```typescript
+interface FolderClearedConfirmedMessage extends SyncMessage {
+  type: 'FOLDER_CLEARED_CONFIRMED';
+}
+```
+
+**Example:**
+```json
+{
+  "type": "FOLDER_CLEARED_CONFIRMED"
+}
+```
+
+#### PONG
+ส่งเพื่อตอบสนองต่อ PING message
+```typescript
+interface PongMessage extends SyncMessage {
+  type: 'PONG';
+}
+```
+
+**Example:**
+```json
+{
+  "type": "PONG"
+}
+```
+
+#### ERROR
+ส่งเมื่อเกิด error ในการประมวลผล message
+```typescript
+interface ErrorMessage extends SyncMessage {
+  type: 'ERROR';
+  payload: {
+    message: string;         // ข้อความ error
+  };
+}
+```
+
+**Example:**
+```json
+{
+  "type": "ERROR",
+  "payload": {
+    "message": "Failed to sync file"
+  }
+}
+```
+
+## Message Flow
+
+### File Sync Flow
+```
+Client A                    Server                    Client B
+   │                         │                         │
+   │ 1. SYNC_FILE           │                         │
+   │─────────────────────────▶                         │
+   │                         │ 2. Save file           │
+   │                         │ 3. FILE_SYNCED         │
+   │◀─────────────────────────│                         │
+   │                         │ 4. FILE_UPDATED        │
+   │                         │─────────────────────────▶
+   │                         │                         │ 5. Update local file
+```
+
+### File Deletion Flow
+```
+Client A                    Server                    Client B
+   │                         │                         │
+   │ 1. DELETE_FILE         │                         │
+   │─────────────────────────▶                         │
+   │                         │ 2. Delete file         │
+   │                         │ 3. FILE_DELETED_CONFIRMED
+   │◀─────────────────────────│                         │
+   │                         │ 4. FILE_DELETED        │
+   │                         │─────────────────────────▶
+   │                         │                         │ 5. Delete local file
+```
+
+### Server File Change Flow
+```
+Server                      Client A                  Client B
+   │                         │                         │
+   │ 1. File changed         │                         │
+   │ 2. FILE_CHANGED         │                         │
+   │─────────────────────────▶                         │
+   │                         │ 3. Update local file   │
+   │                         │                         │◀─────────────────────────
+   │                         │                         │ 4. Update local file
+```
+
+## Error Handling
+
+### Message Parsing Errors
+- Invalid JSON format
+- Missing required fields
+- Unknown message types
+
+### File Operation Errors
+- Permission denied
+- File not found
+- Disk space issues
+- Network timeouts
+
+### Error Response
+```typescript
+// Server ส่ง error message กลับไปยัง client
+this.sendToClient(clientId, {
+  type: 'ERROR',
+  payload: { message: 'Failed to sync file' }
+});
+```
+
+## Version Control
+
+### File Versioning
+ทุกไฟล์มี version number เพื่อป้องกันการสูญเสียข้อมูล:
+
+```typescript
+interface FileInfo {
+  relativePath: string;
+  content: string;
+  lastModified: number;
+  lastClientId: string;
+  version: number;  // ← Version number
+}
+```
+
+### Version Increment
+```typescript
+private getNextVersion(relativePath: string): number {
+  const existingFile = this.files.get(relativePath);
+  return (existingFile?.version || 0) + 1;
+}
+```
+
+### Conflict Detection
+```typescript
+// ตรวจสอบ version conflict
+if (existingFile && existingFile.lastClientId !== clientId) {
+  if (existingFile.content !== content) {
+    logger.warn(`Potential conflict detected for ${relativePath}`);
+    // ปัจจุบัน server version จะชนะ
+  }
+}
+```
+
+## Message Broadcasting
+
+### Broadcast to Others
+ส่ง message ไปยัง clients ทั้งหมดยกเว้น sender:
+```typescript
+private broadcastToOthers(senderId: string, message: any): void {
+  this.clients.forEach((client, clientId) => {
+    if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+      try {
+        client.ws.send(JSON.stringify(message));
+      } catch (error) {
+        logger.error(`Error broadcasting to client ${clientId}:`, error);
+      }
+    }
+  });
+}
+```
+
+### Broadcast to All
+ส่ง message ไปยัง clients ทั้งหมด:
+```typescript
+private broadcastToAll(message: any): void {
+  this.clients.forEach((client, clientId) => {
+    if (client.ws.readyState === WebSocket.OPEN) {
+      try {
+        client.ws.send(JSON.stringify(message));
+      } catch (error) {
+        logger.error(`Error broadcasting to client ${clientId}:`, error);
+      }
+    }
+  });
+}
+```
+
+## Heartbeat Mechanism
+
+### Ping/Pong System
+```typescript
+// Server ส่ง ping ทุก 30 วินาที
+private startPingInterval(): void {
+  this.pingInterval = setInterval(() => {
+    this.clients.forEach((client, clientId) => {
+      if (!client.isAlive) {
+        logger.connection(`Terminating inactive client: ${clientId}`);
+        client.ws.terminate();
+        this.clients.delete(clientId);
+        return;
+      }
+
+      client.isAlive = false;
+      try {
+        client.ws.ping();
+      } catch (error) {
+        logger.error(`Error pinging client ${clientId}:`, error);
+      }
+    });
+  }, 30000); // 30 seconds
+}
+```
+
+### Client Response
+```typescript
+// Client ตอบสนองต่อ ping
+ws.on('pong', () => {
+  const client = this.clients.get(clientId);
+  if (client) {
+    client.isAlive = true;
+    client.lastPing = Date.now();
+  }
+});
+```
+
+## Protocol Extensions
+
+### Future Message Types
+```typescript
+// Batch operations
+interface BatchSyncMessage extends SyncMessage {
+  type: 'BATCH_SYNC';
+  payload: {
+    files: Array<{
+      relativePath: string;
+      fileContent: string;
+    }>;
+  };
+}
+
+// Authentication
+interface AuthMessage extends SyncMessage {
+  type: 'AUTH';
+  payload: {
+    token: string;
+    clientId: string;
+  };
+}
+
+// Conflict resolution
+interface ConflictResolutionMessage extends SyncMessage {
+  type: 'CONFLICT_RESOLUTION';
+  payload: {
+    relativePath: string;
+    localVersion: string;
+    serverVersion: string;
+    mergeOptions: string[];
+  };
+}
+```
+
+## Message Validation
+
+### Required Fields
+- `type`: ต้องมีเสมอ
+- `payload`: อาจมีหรือไม่มีขึ้นอยู่กับ message type
+
+### Field Validation
+```typescript
+// ตรวจสอบ required fields
+if (message.payload?.relativePath && message.payload?.fileContent) {
+  // Process message
+} else {
+  logger.warn('Missing required fields in message');
+}
+```
+
+### Type Safety
+```typescript
+// TypeScript interfaces สำหรับ type safety
+type SyncMessageType = 
+  | FileSyncMessage 
+  | DeleteFileMessage 
+  | ClearFolderMessage 
+  | PingMessage;
+
+function handleMessage(message: SyncMessageType): void {
+  switch (message.type) {
+    case 'SYNC_FILE':
+      // TypeScript รู้ว่า message เป็น FileSyncMessage
+      const { relativePath, fileContent } = message.payload;
+      break;
+    // ... other cases
+  }
+}
+```
+description:
+globs:
+alwaysApply: false
+---

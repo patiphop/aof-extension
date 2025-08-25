@@ -2,6 +2,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { FileManager } from './FileManager';
 import { logger } from './utils/Logger';
+import { ServerConfig } from './config';
+import { GitignoreParser } from './utils/GitignoreParser';
 import { 
   SyncMessage, 
   FileSyncMessage, 
@@ -17,21 +19,40 @@ export class SyncServer {
   private wss: WebSocketServer;
   private clients: Map<string, ClientInfo> = new Map();
   private fileManager: FileManager;
-  private port: number;
+  private config: ServerConfig;
   private pingInterval!: NodeJS.Timeout;
+  private gitignoreParser: GitignoreParser;
 
-  constructor(port: number = 1420) {
-    this.port = port;
-    const baseDir = '/Users/patiphopungudchuak/Documents/workspaces/sync-local-files';
-    this.fileManager = new FileManager(baseDir);
-    this.wss = new WebSocketServer({ port });
+  constructor(config: ServerConfig) {
+    this.config = config;
+    this.fileManager = new FileManager(config.baseDir, config.maxFileSize);
+    this.gitignoreParser = new GitignoreParser();
+    
+    // Configure WebSocket server with larger payload limits
+    this.wss = new WebSocketServer({ 
+      port: config.port,
+      maxPayload: config.maxPayloadSize,
+      perMessageDeflate: config.compression.enabled ? {
+        threshold: config.compression.threshold,
+        concurrencyLimit: config.compression.concurrencyLimit
+      } : false
+    });
     
     this.setupWebSocketServer();
     this.setupFileWatcher();
     this.startPingInterval();
     
-    logger.server(`faizSync Server started on port ${port}`);
+    logger.server(`faizSync Server started on port ${config.port}`);
     logger.server(`Base directory: ${this.fileManager.getBaseDir()}`);
+    logger.server(`Max payload size: ${config.maxPayloadSize / (1024 * 1024)}MB`);
+    logger.server(`Max file size: ${config.maxFileSize / (1024 * 1024)}MB`);
+    
+    // Log gitignore patterns
+    const gitignorePatterns = this.gitignoreParser.loadAllGitignores(config.baseDir);
+    if (gitignorePatterns.length > 0) {
+      logger.server(`Loaded ${gitignorePatterns.length} gitignore patterns`);
+      logger.debug('Gitignore patterns:', gitignorePatterns);
+    }
   }
 
   /**
@@ -138,6 +159,19 @@ export class SyncServer {
    */
   private handleMessage(clientId: string, data: any): void {
     try {
+      // Check payload size before processing
+      const payloadSize = data.length || data.byteLength || 0;
+      if (payloadSize > this.config.maxPayloadSize) {
+        logger.error(`Client ${clientId} sent oversized message: ${payloadSize} bytes (max: ${this.config.maxPayloadSize} bytes)`);
+        this.sendToClient(clientId, {
+          type: 'ERROR',
+          payload: { 
+            message: `Message too large: ${payloadSize} bytes (max: ${this.config.maxPayloadSize} bytes)` 
+          }
+        });
+        return;
+      }
+
       const message: SyncMessage = JSON.parse(data.toString());
       logger.debug(`Message from client ${clientId}:`, message.type);
 
@@ -168,6 +202,19 @@ export class SyncServer {
   private async handleFileSync(clientId: string, message: FileSyncMessage): Promise<void> {
     try {
       const { relativePath, fileContent } = message.payload;
+      
+      // Check file content size
+      const contentSize = Buffer.byteLength(fileContent, 'utf8');
+      if (contentSize > this.config.maxPayloadSize) {
+        logger.error(`Client ${clientId} tried to sync oversized file: ${relativePath} (${contentSize} bytes)`);
+        this.sendToClient(clientId, {
+          type: 'ERROR',
+          payload: { 
+            message: `File too large: ${relativePath} (${contentSize} bytes, max: ${this.config.maxPayloadSize} bytes)` 
+          }
+        });
+        return;
+      }
       
       // Sync file to local storage
       await this.fileManager.syncFile(relativePath, fileContent, clientId);
@@ -347,11 +394,37 @@ export class SyncServer {
    */
   getStats(): any {
     return {
-      port: this.port,
+      port: this.config.port,
       clientCount: this.clients.size,
       fileCount: this.fileManager.getFileCount(),
-      baseDir: this.fileManager.getBaseDir()
+      baseDir: this.fileManager.getBaseDir(),
+      maxPayloadSize: this.config.maxPayloadSize,
+      maxPayloadSizeMB: this.config.maxPayloadSize / (1024 * 1024),
+      maxFileSize: this.config.maxFileSize,
+      maxFileSizeMB: this.config.maxFileSize / (1024 * 1024)
     };
+  }
+
+  /**
+   * Get maximum payload size
+   */
+  getMaxPayloadSize(): number {
+    return this.config.maxPayloadSize;
+  }
+
+  /**
+   * Get gitignore patterns
+   */
+  getGitignorePatterns(): string[] {
+    return this.gitignoreParser.loadAllGitignores(this.config.baseDir);
+  }
+
+  /**
+   * Check if a file should be ignored
+   */
+  shouldIgnoreFile(relativePath: string): boolean {
+    const gitignorePatterns = this.gitignoreParser.loadAllGitignores(this.config.baseDir);
+    return this.gitignoreParser.shouldIgnore(relativePath, gitignorePatterns);
   }
 
   /**

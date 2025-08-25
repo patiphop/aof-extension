@@ -41,10 +41,17 @@ export class WebSocketClient extends EventEmitter {
         this.ws.on('message', (data: WebSocket.Data) => {
           try {
             const message = JSON.parse(data.toString());
-            this.emit('message', message);
-                  } catch (error) {
-          logger.error('Invalid JSON message received:', error);
-        }
+            
+            // Handle error messages from server
+            if (message.type === 'ERROR') {
+              logger.error('Server error:', message.payload?.message || 'Unknown error');
+              this.emit('serverError', message.payload?.message || 'Unknown error');
+            } else {
+              this.emit('message', message);
+            }
+          } catch (error) {
+            logger.error('Invalid JSON message received:', error);
+          }
         });
 
         this.ws.on('close', (code: number, reason: Buffer) => {

@@ -1,0 +1,581 @@
+---
+description:
+globs: "**"
+alwaysApply: true
+---
+
+# faizSync Utilities and Services
+
+## FileScanner
+
+### Purpose
+Recursively scans directories and filters files based on type and gitignore patterns.
+
+### Core Methods
+```typescript
+class FileScanner {
+  // Check if file is text-based
+  isTextFile(fileName: string): boolean
+  
+  // Scan all text files in directory recursively
+  scanFiles(rootPath: string): string[]
+  
+  // Get relative path from root directory
+  getRelativePath(rootPath: string, filePath: string): string
+}
+```
+
+### File Type Detection
+```typescript
+private readonly textFileExtensions = [
+  '.txt', '.md', '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp',
+  '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+  '.css', '.scss', '.sass', '.less', '.html', '.htm', '.svg', '.sql',
+  '.sh', '.bat', '.ps1', '.dockerfile', '.gitignore', '.gitattributes'
+];
+
+private readonly binaryFileExtensions = [
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp', '.ico',
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
+  '.exe', '.dll', '.so', '.dylib', '.a', '.lib', '.o', '.obj'
+];
+
+private readonly textFileNames = [
+  'Dockerfile', 'Makefile', 'README', 'LICENSE', 'CHANGELOG',
+  '.gitignore', '.gitattributes', '.editorconfig', '.eslintrc'
+];
+```
+
+### File Scanning Logic
+```typescript
+scanFiles(rootPath: string): string[] {
+  if (!fs.existsSync(rootPath)) {
+    return [];
+  }
+
+  const files: string[] = [];
+  const gitignorePatterns = this.gitignoreParser.loadAllGitignores(rootPath);
+
+  const scanDirectory = (dirPath: string) => {
+    try {
+      const items = fs.readdirSync(dirPath);
+      
+      for (const item of items) {
+        const itemPath = path.join(dirPath, item);
+        const stats = fs.statSync(itemPath);
+        
+        if (stats.isDirectory()) {
+          // Check if directory should be ignored
+          const relativeDirPath = this.getRelativePath(rootPath, itemPath);
+          if (!this.gitignoreParser.shouldIgnore(relativeDirPath + '/', gitignorePatterns)) {
+            scanDirectory(itemPath);
+          }
+        } else if (stats.isFile()) {
+          // Check if file should be ignored
+          const relativeFilePath = this.getRelativePath(rootPath, itemPath);
+          if (!this.gitignoreParser.shouldIgnore(relativeFilePath, gitignorePatterns)) {
+            if (this.isTextFile(item)) {
+              files.push(itemPath);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.error(`Error scanning directory ${dirPath}:`, error);
+    }
+  };
+
+  scanDirectory(rootPath);
+  return files;
+}
+```
+
+## GitignoreParser
+
+### Purpose
+Parses .gitignore files and determines which files/directories should be ignored.
+
+### Core Methods
+```typescript
+class GitignoreParser {
+  // Parse gitignore content into patterns
+  parseGitignore(content: string): string[]
+  
+  // Load gitignore from specific directory
+  loadGitignoreFromPath(dirPath: string): string[]
+  
+  // Check if path should be ignored
+  shouldIgnore(filePath: string, patterns: string[]): boolean
+  
+  // Load all gitignore patterns recursively
+  loadAllGitignores(rootPath: string): string[]
+}
+```
+
+### Pattern Parsing
+```typescript
+parseGitignore(content: string): string[] {
+  return content
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0 && !line.startsWith('#'))
+    .map(line => line.replace(/\r$/, ''));
+}
+```
+
+### Ignore Logic
+```typescript
+shouldIgnore(filePath: string, patterns: string[]): boolean {
+  const normalizedPath = filePath.replace(/\\/g, '/');
+  
+  // Always ignore .git folder
+  if (normalizedPath.startsWith('.git/')) {
+    return true;
+  }
+  
+  // First check for negated patterns
+  for (const pattern of patterns) {
+    if (pattern.startsWith('!')) {
+      const negatedPattern = pattern.substring(1);
+      if (minimatch(normalizedPath, negatedPattern, { dot: true })) {
+        return false;
+      }
+    }
+  }
+  
+  // Then check for regular patterns
+  for (const pattern of patterns) {
+    if (!pattern.startsWith('!')) {
+      // Handle directory patterns (ending with /)
+      if (pattern.endsWith('/')) {
+        const dirPattern = pattern.slice(0, -1);
+        if (normalizedPath.startsWith(dirPattern + '/')) {
+          return true;
+        }
+      } else {
+        // Handle file patterns
+        if (minimatch(normalizedPath, pattern, { dot: true })) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  return false;
+}
+```
+
+### Recursive Loading
+```typescript
+loadAllGitignores(rootPath: string): string[] {
+  const patterns: string[] = [];
+  
+  const loadGitignoresRecursive = (dirPath: string) => {
+    // Load gitignore from current directory
+    const currentPatterns = this.loadGitignoreFromPath(dirPath);
+    patterns.push(...currentPatterns);
+    
+    // Recursively check subdirectories
+    try {
+      const items = fs.readdirSync(dirPath);
+      for (const item of items) {
+        const itemPath = path.join(dirPath, item);
+        const stats = fs.statSync(itemPath);
+        
+        if (stats.isDirectory() && !item.startsWith('.')) {
+          loadGitignoresRecursive(itemPath);
+        }
+      }
+    } catch (error) {
+      logger.error(`Error reading directory ${dirPath}:`, error);
+    }
+  };
+  
+  loadGitignoresRecursive(rootPath);
+  return patterns;
+}
+```
+
+## Logger
+
+### Purpose
+Configurable logging system with different levels and categories.
+
+### Log Levels
+```typescript
+export enum LogLevel {
+  ERROR = 0,    // Always shown
+  WARN = 1,     // Warnings and errors
+  INFO = 2,     // Info, warnings, and errors (default)
+  DEBUG = 3     // All messages including debug
+}
+```
+
+### Logger Configuration
+```typescript
+export interface LoggingConfig {
+  level: LogLevel;
+  showFileSync: boolean;
+  showConnection: boolean;
+  showDebug: boolean;
+}
+
+export const defaultLoggingConfig: LoggingConfig = {
+  level: LogLevel.INFO,
+  showFileSync: true,
+  showConnection: true,
+  showDebug: false
+};
+
+export const quietLoggingConfig: LoggingConfig = {
+  level: LogLevel.WARN,
+  showFileSync: false,
+  showConnection: true,
+  showDebug: false
+};
+
+export const verboseLoggingConfig: LoggingConfig = {
+  level: LogLevel.DEBUG,
+  showFileSync: true,
+  showConnection: true,
+  showDebug: true
+};
+```
+
+### Logging Methods
+```typescript
+class Logger {
+  // Basic logging methods
+  error(message: string, ...args: unknown[]): void
+  warn(message: string, ...args: unknown[]): void
+  info(message: string, ...args: unknown[]): void
+  debug(message: string, ...args: unknown[]): void
+  
+  // Category-specific logging
+  extension(message: string, ...args: unknown[]): void
+  server(message: string, ...args: unknown[]): void
+  sync(message: string, ...args: unknown[]): void
+  connection(message: string, ...args: unknown[]): void
+}
+```
+
+### Usage Examples
+```typescript
+// Basic logging
+logger.error('Connection failed:', error);
+logger.warn('Unknown message type:', message.type);
+logger.info('Server started on port 1420');
+logger.debug('Message received:', message);
+
+// Category-specific logging
+logger.extension('Extension activated');
+logger.server('Server started');
+logger.sync('File synced: example.txt');
+logger.connection('Client connected: abc123');
+```
+
+## SyncManager
+
+### Purpose
+Coordinates file synchronization between client and server.
+
+### Core Methods
+```typescript
+class SyncManager extends EventEmitter {
+  // Sync control
+  async startSync(): Promise<void>
+  async stopSync(): Promise<void>
+  
+  // File operations
+  syncFile(filePath: string): void
+  deleteFile(filePath: string): void
+  
+  // Status queries
+  isSyncing(): boolean
+  getLocalFolderPath(): string
+  
+  // Server message handling
+  handleServerMessage(message: ServerMessage): void
+}
+```
+
+### Sync Lifecycle
+```typescript
+async startSync(): Promise<void> {
+  if (this.isActive) {
+    throw new Error('Sync is already active');
+  }
+
+  try {
+    await this.webSocketClient.connect();
+    this.isActive = true;
+
+    // Perform initial sync
+    await this.performInitialSync();
+
+    this.emit('syncStarted');
+  } catch (error) {
+    this.isActive = false;
+    logger.error('Error starting sync:', error);
+    throw error;
+  }
+}
+```
+
+### Initial Sync
+```typescript
+private async performInitialSync(): Promise<void> {
+  const files = this.fileScanner.scanFiles(this.localFolderPath);
+  
+  for (const filePath of files) {
+    try {
+      const relativePath = this.fileScanner.getRelativePath(this.localFolderPath, filePath);
+      const content = fs.readFileSync(filePath, 'utf8');
+      this.webSocketClient.sendFile(relativePath, content);
+    } catch (error) {
+      logger.error(`Error in initial sync for ${filePath}:`, error);
+    }
+  }
+
+  logger.sync(`Initial sync complete. Synced ${files.length} files.`);
+}
+```
+
+### Server Message Handling
+```typescript
+handleServerMessage(message: ServerMessage): void {
+  switch (message.type) {
+    case 'FILE_UPDATED':
+      if (message.payload?.relativePath && message.payload?.fileContent) {
+        this.handleFileUpdate({
+          relativePath: message.payload.relativePath,
+          fileContent: message.payload.fileContent
+        });
+      }
+      break;
+    case 'FILE_CREATED':
+      if (message.payload?.relativePath && message.payload?.fileContent) {
+        this.handleFileCreated({
+          relativePath: message.payload.relativePath,
+          fileContent: message.payload.fileContent,
+          version: message.payload.version
+        });
+      }
+      break;
+    case 'FILE_CHANGED':
+      if (message.payload?.relativePath && message.payload?.fileContent) {
+        this.handleFileChanged({
+          relativePath: message.payload.relativePath,
+          fileContent: message.payload.fileContent,
+          version: message.payload.version
+        });
+      }
+      break;
+    case 'FILE_DELETED':
+      if (message.payload?.relativePath) {
+        this.handleFileDelete({
+          relativePath: message.payload.relativePath
+        });
+      }
+      break;
+    case 'FOLDER_CLEARED':
+      this.handleFolderCleared();
+      break;
+    default:
+      logger.warn('Unknown message type:', message.type);
+  }
+}
+```
+
+## WebSocketClient
+
+### Purpose
+Manages WebSocket connection to sync server with reconnection support.
+
+### Core Methods
+```typescript
+class WebSocketClient extends EventEmitter {
+  // Connection management
+  async connect(): Promise<void>
+  disconnect(): void
+  isConnected(): boolean
+  
+  // Message sending
+  send(message: SyncMessage): void
+  sendFile(relativePath: string, fileContent: string): void
+  sendDeleteFile(relativePath: string): void
+  sendClearFolder(): void
+  
+  // Reconnection
+  async reconnect(): Promise<void>
+}
+```
+
+### Connection Management
+```typescript
+async connect(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      this.ws = new WebSocket(this.url);
+
+      // Set up event handlers
+      this.ws.on('open', () => {
+        this.reconnectAttempts = 0;
+        this.emit('open');
+        resolve();
+      });
+
+      this.ws.on('message', (data: WebSocket.Data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          this.emit('message', message);
+        } catch (error) {
+          logger.error('Invalid JSON message received:', error);
+        }
+      });
+
+      this.ws.on('close', (code: number, reason: Buffer) => {
+        this.emit('close', code, reason.toString());
+        this.ws = null;
+      });
+
+      this.ws.on('error', (error: Error) => {
+        this.emit('error', error);
+        reject(error);
+      });
+
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+```
+
+### Reconnection Logic
+```typescript
+async reconnect(): Promise<void> {
+  if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+    this.emit('maxReconnectAttemptsReached');
+    return;
+  }
+
+  this.reconnectAttempts++;
+  const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+  setTimeout(async () => {
+    try {
+      await this.connect();
+    } catch (error) {
+      logger.error('Reconnection attempt failed:', error);
+      await this.reconnect();
+    }
+  }, delay);
+}
+```
+
+### Message Sending
+```typescript
+sendFile(relativePath: string, fileContent: string): void {
+  this.send({
+    type: 'SYNC_FILE',
+    payload: {
+      relativePath,
+      fileContent
+    }
+  });
+}
+
+sendDeleteFile(relativePath: string): void {
+  this.send({
+    type: 'DELETE_FILE',
+    payload: {
+      relativePath
+    }
+  });
+}
+
+sendClearFolder(): void {
+  this.send({
+    type: 'CLEAR_FOLDER'
+  });
+}
+```
+
+## WebViewProvider
+
+### Purpose
+Provides dashboard interface for sync control and monitoring.
+
+### Core Methods
+```typescript
+class WebViewProvider {
+  // WebView management
+  show(): void
+  updateWebview(): void
+  
+  // Content generation
+  private getWebviewContent(): string
+}
+```
+
+### WebView Setup
+```typescript
+show(): void {
+  if (this.panel) {
+    this.panel.reveal();
+    return;
+  }
+
+  this.panel = vscode.window.createWebviewPanel(
+    WebViewProvider.viewType,
+    'faizSync Dashboard',
+    vscode.ViewColumn.One,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [
+        vscode.Uri.file(path.join(__dirname, '..', '..', 'media'))
+      ]
+    }
+  );
+
+  this.panel.webview.html = this.getWebviewContent();
+
+  // Handle messages from the webview
+  this.panel.webview.onDidReceiveMessage(
+    message => {
+      switch (message.command) {
+        case 'startSync':
+          vscode.commands.executeCommand('faizsync.startSync');
+          break;
+        case 'stopSync':
+          vscode.commands.executeCommand('faizsync.stopSync');
+          break;
+        case 'refresh':
+          this.updateWebview();
+          break;
+      }
+    },
+    undefined,
+    []
+  );
+
+  // Handle panel disposal
+  this.panel.onDidDispose(() => {
+    this.panel = undefined;
+  });
+}
+```
+
+### Dashboard Features
+- Connection status indicator
+- Sync control buttons
+- File sync information
+- Activity log
+- Real-time updates
+- VSCode theme integration
+description:
+globs:
+alwaysApply: false
+---

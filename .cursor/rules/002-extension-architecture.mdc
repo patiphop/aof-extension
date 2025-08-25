@@ -1,0 +1,223 @@
+---
+
+description:
+globs: "**"
+alwaysApply: true
+---
+
+
+# faizSync Extension Architecture
+
+## Extension Structure
+
+### Main Entry Point
+- **File**: `src/extension.ts`
+- **Purpose**: VSCode extension lifecycle management
+- **Commands**: `faizsync.startSync`, `faizsync.stopSync`, `faizsync.openWebView`
+
+### Service Layer
+- **SyncManager**: Coordinates file operations and WebSocket communication
+- **WebSocketClient**: Manages connection to sync server
+
+### Utility Layer
+- **FileScanner**: File system scanning and filtering
+- **GitignoreParser**: .gitignore pattern parsing and application
+- **Logger**: Configurable logging system
+
+### WebView Layer
+- **WebViewProvider**: Dashboard interface for sync control and monitoring
+
+## Extension Lifecycle
+
+### Activation
+```typescript
+export function activate(context: vscode.ExtensionContext) {
+  // Set up logger for extension mode
+  logger.setExtensionMode(true);
+  logger.setConfig(quietLoggingConfig);
+  
+  // Register commands
+  const startSyncCmd = vscode.commands.registerCommand('faizsync.startSync', startSync);
+  const stopSyncCmd = vscode.commands.registerCommand('faizsync.stopSync', stopSync);
+  const openWebViewCmd = vscode.commands.registerCommand('faizsync.openWebView', openWebView);
+  
+  context.subscriptions.push(startSyncCmd, stopSyncCmd, openWebViewCmd);
+}
+```
+
+### Deactivation
+```typescript
+export function deactivate() {
+  if (syncManager) {
+    syncManager.stopSync();
+  }
+}
+```
+
+## Command Implementation
+
+### Start Sync
+1. Prompt user to select local folder
+2. Create SyncManager instance
+3. Set up event listeners
+4. Start sync process
+5. Set up file watchers
+
+### Stop Sync
+1. Stop sync manager
+2. Send clear folder message to server
+3. Disconnect WebSocket
+4. Clean up resources
+
+### Open WebView
+1. Create WebViewProvider instance
+2. Show dashboard interface
+3. Handle webview messages
+
+## File Watching
+
+### VSCode File System Watcher
+```typescript
+const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*');
+
+fileWatcher.onDidChange(async (uri) => {
+  if (uri.fsPath.startsWith(localFolderPath)) {
+    syncManager!.syncFile(uri.fsPath);
+  }
+});
+
+fileWatcher.onDidCreate(async (uri) => {
+  if (uri.fsPath.startsWith(localFolderPath)) {
+    syncManager!.syncFile(uri.fsPath);
+  }
+});
+
+fileWatcher.onDidDelete(async (uri) => {
+  if (uri.fsPath.startsWith(localFolderPath)) {
+    syncManager!.deleteFile(uri.fsPath);
+  }
+});
+```
+
+## Event Handling
+
+### Sync Manager Events
+- `syncStarted`: Sync process started
+- `syncStopped`: Sync process stopped
+- `connected`: Connected to server
+- `disconnected`: Disconnected from server
+- `error`: Sync error occurred
+- `fileUpdated`: File updated from server
+- `fileDeleted`: File deleted from server
+- `folderCleared`: Server folder cleared
+
+### Event Listener Setup
+```typescript
+function setupSyncEventListeners(): void {
+  if (!syncManager) return;
+
+  syncManager.on('syncStarted', () => {
+    vscode.window.showInformationMessage('Sync started successfully');
+  });
+
+  syncManager.on('syncStopped', () => {
+    vscode.window.showInformationMessage('Sync stopped');
+  });
+
+  syncManager.on('connected', () => {
+    vscode.window.showInformationMessage('Connected to sync server');
+  });
+
+  syncManager.on('disconnected', (code: number, reason: string) => {
+    vscode.window.showWarningMessage(`Disconnected from sync server: ${reason}`);
+  });
+
+  syncManager.on('error', (error: Error) => {
+    vscode.window.showErrorMessage(`Sync error: ${error.message}`);
+  });
+
+  syncManager.on('fileUpdated', (relativePath: string) => {
+    vscode.window.showInformationMessage(`File updated from server: ${relativePath}`);
+  });
+
+  syncManager.on('fileDeleted', (relativePath: string) => {
+    vscode.window.showInformationMessage(`File deleted from server: ${relativePath}`);
+  });
+
+  syncManager.on('folderCleared', () => {
+    vscode.window.showInformationMessage('Server folder cleared');
+  });
+}
+```
+
+## User Interface
+
+### Command Palette Integration
+- Commands available in VSCode Command Palette
+- Keyboard shortcuts can be configured
+- Commands show in extension category
+
+### WebView Dashboard
+- Real-time sync status
+- Connection information
+- Activity log
+- Control buttons for sync operations
+
+### Notifications
+- Information messages for successful operations
+- Warning messages for disconnections
+- Error messages for failures
+- Progress indicators for long operations
+
+## Configuration
+
+### Logging Configuration
+```typescript
+import { quietLoggingConfig } from './config/logging';
+
+logger.setExtensionMode(true);
+logger.setConfig(quietLoggingConfig);
+```
+
+### Extension Settings
+```json
+{
+  "faizsync.serverUrl": "ws://192.168.1.105:1420",
+  "faizsync.autoSync": true,
+  "faizsync.syncInterval": 5000
+}
+```
+
+## Error Handling
+
+### Connection Errors
+- WebSocket connection failures
+- Network timeouts
+- Server unavailable
+
+### File Operation Errors
+- Permission denied
+- File not found
+- Disk space issues
+
+### Sync Errors
+- File conflicts
+- Version mismatches
+- Server errors
+
+## Performance Considerations
+
+### File Watching
+- Only watch files within selected sync folder
+- Debounce rapid file changes
+- Filter out temporary files
+
+### Memory Management
+- Dispose of file watchers properly
+- Clean up event listeners
+- Release WebSocket connections
+
+### Logging
+- Use appropriate log levels
+- Avoid excessive logging in production
+- Filter out noise from file operations
